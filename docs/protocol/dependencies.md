@@ -12,6 +12,15 @@ Versions are pinned in `go.mod` and must be re-reviewed when updated.
 - Verification: the full test, race, vet, build, staticcheck, and govulncheck
   suite passes with Go 1.26.5 and reports zero reachable vulnerabilities
 
+## Terminal input
+
+- Module: `golang.org/x/term`
+- Version at selection: `v0.45.0`
+- License: BSD-3-Clause
+- Purpose: no-echo passphrase, token, and private choice input on terminals
+- Secret inputs also support explicitly opened file descriptors for automation;
+  no command defines passphrase, token, or choice value flags
+
 ## Cobra
 
 - Module: `github.com/spf13/cobra`
