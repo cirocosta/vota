@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -57,6 +58,22 @@ func TestDHMatchesPeer(t *testing.T) {
 	}
 	if aliceShared == ([32]byte{}) {
 		t.Fatal("valid peers derived an all-zero shared secret")
+	}
+}
+
+func TestKeypairStringDoesNotExposePrivateKey(t *testing.T) {
+	t.Parallel()
+
+	kp := &keypair{}
+	copy(kp.x[:], "private-key-material-private-key")
+	copy(kp.P[:], "public-key-material-public-key--")
+
+	rendered := fmt.Sprint(kp)
+	if strings.Contains(rendered, hex.EncodeToString(kp.x[:])) {
+		t.Fatalf("keypair string exposes private key: %q", rendered)
+	}
+	if !strings.Contains(rendered, hex.EncodeToString(kp.P[:])) {
+		t.Fatalf("keypair string omits public key: %q", rendered)
 	}
 }
 
