@@ -2,13 +2,10 @@
 package auditcmd
 
 import (
-	"crypto/ed25519"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/cirocosta/vota/internal/audit"
 	"github.com/cirocosta/vota/internal/auditverify"
@@ -116,23 +113,8 @@ func newCompareCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		if first.Manifest.PollID != second.Manifest.PollID || first.CheckpointKey != second.CheckpointKey {
-			return fmt.Errorf("incomparable_audit_records")
-		}
-		key, err := checkpointKey(first.CheckpointKey)
-		if err != nil {
+		if err := audit.CompareBundles(first, second); err != nil {
 			return err
-		}
-		bySequence := make(map[uint64]protocol.Checkpoint, len(first.Checkpoints))
-		for _, checkpoint := range first.Checkpoints {
-			bySequence[checkpoint.Sequence] = checkpoint
-		}
-		for _, checkpoint := range second.Checkpoints {
-			if previous, exists := bySequence[checkpoint.Sequence]; exists {
-				if err := audit.CompareCheckpoints(key, previous, checkpoint); err != nil {
-					return err
-				}
-			}
 		}
 		_, err = fmt.Fprintln(command.OutOrStdout(), "checkpoint histories are compatible")
 		return err
@@ -177,13 +159,4 @@ func createFile(path string, encoded []byte) error {
 		return err
 	}
 	return file.Close()
-}
-
-func checkpointKey(value string) (ed25519.PublicKey, error) {
-	payload, ok := strings.CutPrefix(value, "ed25519:")
-	decoded, err := hex.DecodeString(payload)
-	if !ok || err != nil || len(decoded) != ed25519.PublicKeySize {
-		return nil, fmt.Errorf("invalid_checkpoint_key")
-	}
-	return ed25519.PublicKey(decoded), nil
 }
