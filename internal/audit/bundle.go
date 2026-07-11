@@ -1,0 +1,79 @@
+package audit
+
+import (
+	"crypto/ed25519"
+	"fmt"
+
+	"github.com/cirocosta/vota/internal/manifest"
+	"github.com/cirocosta/vota/internal/protocol"
+)
+
+type Bundle struct {
+	SchemaVersion int                   `json:"schema_version"`
+	Protocol      string                `json:"protocol"`
+	Manifest      protocol.Manifest     `json:"manifest"`
+	Events        []protocol.AuditEvent `json:"events"`
+	Checkpoints   []protocol.Checkpoint `json:"checkpoints"`
+}
+
+// Export verifies and canonicalizes a public audit-chain bundle.
+func Export(bundle Bundle, checkpointKey ed25519.PublicKey) ([]byte, error) {
+	if err := VerifyBundle(bundle, checkpointKey); err != nil {
+		return nil, err
+	}
+	encoded, err := protocol.MarshalCanonical(bundle)
+	if err != nil {
+		return nil, &Error{Code: "audit_export_failed", Err: err}
+	}
+	return encoded, nil
+}
+
+// ParseBundle strictly decodes and verifies an exported bundle.
+func ParseBundle(encoded []byte, checkpointKey ed25519.PublicKey) (Bundle, error) {
+	var bundle Bundle
+	if err := protocol.DecodeStrict(encoded, &bundle); err != nil {
+		return Bundle{}, &Error{Code: "invalid_audit_bundle", Err: err}
+	}
+	if err := VerifyBundle(bundle, checkpointKey); err != nil {
+		return Bundle{}, err
+	}
+	return bundle, nil
+}
+
+// VerifyBundle checks the manifest, complete chain, and every checkpoint.
+func VerifyBundle(bundle Bundle, checkpointKey ed25519.PublicKey) error {
+	if bundle.SchemaVersion != protocol.SchemaVersion || bundle.Protocol != protocol.ProtocolVersion {
+		return &Error{Code: "invalid_audit_bundle"}
+	}
+	if err := manifest.Verify(bundle.Manifest); err != nil {
+		return &Error{Code: "invalid_manifest", Err: err}
+	}
+	if len(bundle.Events) == 0 {
+		return &Error{Code: "empty_audit_chain"}
+	}
+	if len(bundle.Checkpoints) == 0 {
+		return &Error{Code: "checkpoint_chain_mismatch"}
+	}
+	if _, err := Replay(bundle.Events); err != nil {
+		return err
+	}
+	for index, event := range bundle.Events {
+		if event.PollID != bundle.Manifest.PollID {
+			return &Error{Code: "audit_chain_mismatch", Err: fmt.Errorf("event %d poll", index)}
+		}
+	}
+	previousSequence := uint64(0)
+	for _, checkpoint := range bundle.Checkpoints {
+		if checkpoint.PollID != bundle.Manifest.PollID || checkpoint.Sequence <= previousSequence || checkpoint.Sequence > uint64(len(bundle.Events)) || checkpoint.EventHash != bundle.Events[checkpoint.Sequence-1].EventHash {
+			return &Error{Code: "checkpoint_chain_mismatch"}
+		}
+		if err := VerifyCheckpoint(checkpointKey, checkpoint); err != nil {
+			return err
+		}
+		previousSequence = checkpoint.Sequence
+	}
+	if previousSequence != uint64(len(bundle.Events)) {
+		return &Error{Code: "checkpoint_chain_mismatch"}
+	}
+	return nil
+}

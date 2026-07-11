@@ -182,12 +182,17 @@ the ballot count before the evidence can be encoded.
 
 The genesis event uses 32 zero bytes as `previous_hash`. Each event hash is
 SHA-256 over `vota:v1:audit-event`, a zero byte, and canonical event content with
-`event_hash` empty. Sequence numbers start at 1 and increase by exactly one.
+`event_hash` empty. Event content includes the poll ID, sequence, type, object
+hash, previous hash, and normalized UTC acceptance time. Sequence numbers start
+at 1 and increase by exactly one; acceptance times cannot move backward.
 
-A receipt binds poll ID, ballot hash, sequence, event hash, and checkpoint hash
-under `vota:v1:receipt-signature`. Checkpoints are signed by the collector's
-Ed25519 checkpoint key. Comparing checkpoints detects divergent histories but
-does not prevent collector censorship or equivocation.
+A checkpoint hash is SHA-256 over `vota:v1:checkpoint-hash`, a zero byte, and
+canonical checkpoint content with hash and signature empty. The collector signs
+that hash under `vota:v1:checkpoint-signature` with its Ed25519 checkpoint key.
+A receipt signature binds length-prefixed poll ID, ballot hash, sequence, event
+hash, and checkpoint hash under `vota:v1:receipt-signature`. Comparing valid
+checkpoints at the same poll and sequence detects divergent histories but does
+not prevent collector censorship or equivocation.
 
 ## Failure rules
 

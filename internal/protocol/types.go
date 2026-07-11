@@ -56,25 +56,36 @@ type BallotEnvelope struct {
 }
 
 type Receipt struct {
-	SchemaVersion       int    `json:"schema_version"`
-	Protocol            string `json:"protocol"`
-	PollID              string `json:"poll_id"`
-	BallotHash          string `json:"ballot_hash"`
-	Sequence            uint64 `json:"sequence"`
-	EventHash           string `json:"event_hash"`
-	CheckpointHash      string `json:"checkpoint_hash"`
-	CheckpointSignature string `json:"checkpoint_signature"`
+	SchemaVersion  int    `json:"schema_version"`
+	Protocol       string `json:"protocol"`
+	PollID         string `json:"poll_id"`
+	BallotHash     string `json:"ballot_hash"`
+	Sequence       uint64 `json:"sequence"`
+	EventHash      string `json:"event_hash"`
+	CheckpointHash string `json:"checkpoint_hash"`
+	Signature      string `json:"signature"`
 }
 
 type AuditEvent struct {
 	SchemaVersion int    `json:"schema_version"`
 	Protocol      string `json:"protocol"`
+	PollID        string `json:"poll_id"`
 	Sequence      uint64 `json:"sequence"`
 	Type          string `json:"type"`
 	ObjectHash    string `json:"object_hash"`
 	PreviousHash  string `json:"previous_hash"`
 	EventHash     string `json:"event_hash"`
 	AcceptedAt    string `json:"accepted_at"`
+}
+
+type Checkpoint struct {
+	SchemaVersion  int    `json:"schema_version"`
+	Protocol       string `json:"protocol"`
+	PollID         string `json:"poll_id"`
+	Sequence       uint64 `json:"sequence"`
+	EventHash      string `json:"event_hash"`
+	CheckpointHash string `json:"checkpoint_hash"`
+	Signature      string `json:"signature"`
 }
 
 type EncryptedAggregate struct {

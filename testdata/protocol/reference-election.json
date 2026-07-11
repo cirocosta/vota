@@ -101,6 +101,7 @@
     {
       "schema_version": 1,
       "protocol": "vota-v1-experimental",
+      "poll_id": "sha256:3030303030303030303030303030303030303030303030303030303030303030",
       "sequence": 1,
       "type": "ballot_accepted",
       "object_hash": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
@@ -111,6 +112,7 @@
     {
       "schema_version": 1,
       "protocol": "vota-v1-experimental",
+      "poll_id": "sha256:3030303030303030303030303030303030303030303030303030303030303030",
       "sequence": 2,
       "type": "ballot_accepted",
       "object_hash": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
@@ -121,6 +123,7 @@
     {
       "schema_version": 1,
       "protocol": "vota-v1-experimental",
+      "poll_id": "sha256:3030303030303030303030303030303030303030303030303030303030303030",
       "sequence": 3,
       "type": "ballot_accepted",
       "object_hash": "sha256:8888888888888888888888888888888888888888888888888888888888888888",

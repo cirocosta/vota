@@ -30,6 +30,7 @@ const (
 	DomainDecryptionShare      = "vota:v1:decryption-share"
 	DomainDecryptionShareProof = "vota:v1:decryption-share-proof"
 	DomainAuditEvent           = "vota:v1:audit-event"
+	DomainCheckpointHash       = "vota:v1:checkpoint-hash"
 	DomainCheckpointSignature  = "vota:v1:checkpoint-signature"
 	DomainReceiptSignature     = "vota:v1:receipt-signature"
 	DomainTallyEvidence        = "vota:v1:tally-evidence"
@@ -53,6 +54,7 @@ func DomainSeparators() []string {
 		DomainDecryptionShare,
 		DomainDecryptionShareProof,
 		DomainAuditEvent,
+		DomainCheckpointHash,
 		DomainCheckpointSignature,
 		DomainReceiptSignature,
 		DomainTallyEvidence,
