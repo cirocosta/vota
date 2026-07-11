@@ -21,5 +21,4 @@ Documentation:
 - [Experimental protocol](docs/protocol/vota-v1-experimental.md)
 - [Public artifacts](docs/protocol/artifacts.md)
 - [Dependencies](docs/protocol/dependencies.md)
-
-The original elliptic-curve experiments remain in `examples/legacy-ecc`.
+- [Concept examples](examples/README.md)
