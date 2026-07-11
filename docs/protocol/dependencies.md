@@ -32,8 +32,22 @@ Versions are pinned in `go.mod` and must be re-reviewed when updated.
   XChaCha20-Poly1305 keystores
 - Security boundary: use only documented exported primitives; no forked code
 
+## Ristretto255
+
+- Module: `github.com/gtank/ristretto255`
+- Version at selection: `v0.2.0`
+- License: BSD-3-Clause
+- Purpose: RFC 9496 prime-order group and scalar operations
+- Repository activity checked: 2026-07-11; repository updated in 2026
+- Audit status: no package-specific independent audit identified
+- Security boundary: all group and scalar inputs require canonical decoding;
+  Vota adds protocol equations but does not fork group arithmetic
+- Compensating evidence: RFC vectors from the dependency, deterministic Vota
+  vectors, every-position ring tests, mutation tests, fuzzing, race checks, and
+  benchmarks through ring size 256
+
 ## Pending selections
 
-Ristretto255 and SQLite dependencies remain unselected. Their implementation
-tasks must record version, license, maintenance state, known audit status,
-vulnerability scan, and API rationale before adding them to `go.mod`.
+The SQLite dependency remains unselected. Its implementation task must record
+version, license, maintenance state, known audit status, vulnerability scan,
+and API rationale before adding it to `go.mod`.

@@ -59,12 +59,14 @@ Version 1 uses a single-key LSAG-style proof over the complete ring
 The link tag is:
 
 ```text
-I = x * Hp(vota:v1:ring-hash-to-group, poll_id, P[j])
+I = x * Hp(vota:v1:ring-hash-to-group, P[j])
 ```
 
 Per-poll keys make this standard link tag poll-local without changing the
-linking equation. The ballot choice and encryption randomness are not inputs to
-`I`.
+hash-to-group or linking equations. Reusing an eligibility private key in a
+different poll would make participation linkable and is rejected by identity
+and manifest workflows. The poll ID, ballot choice, and encryption randomness
+are not inputs to `I`.
 
 The signed message is the ballot hash. Challenges bind protocol, poll ID,
 manifest hash, canonical ring hash, ballot hash, `I`, and every reconstructed
