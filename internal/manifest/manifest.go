@@ -118,6 +118,7 @@ func Freeze(draft Draft, authorityPrivateKey ed25519.PrivateKey) (Frozen, error)
 		SchemaVersion:               protocol.SchemaVersion,
 		Protocol:                    protocol.ProtocolVersion,
 		EligibilityScheme:           protocol.EligibilityScheme,
+		PollDraftID:                 draftID,
 		Question:                    identity.Question,
 		Choices:                     identity.Choices,
 		EligibleKeys:                eligibleKeys,
@@ -159,6 +160,13 @@ func Parse(encoded []byte) (Frozen, error) {
 func Verify(manifest protocol.Manifest) error {
 	if err := protocol.ValidateManifest(manifest); err != nil {
 		return &Error{Code: protocol.ErrorCode(err), Err: err}
+	}
+	expectedDraftID, err := manifestDraftID(manifest)
+	if err != nil {
+		return err
+	}
+	if manifest.PollDraftID != expectedDraftID {
+		return &Error{Code: "poll_draft_id_mismatch"}
 	}
 	if !slices.IsSortedFunc(manifest.Choices, func(left, right protocol.Choice) int { return strings.Compare(left.ID, right.ID) }) {
 		return &Error{Code: "noncanonical_choice_order"}
@@ -348,6 +356,27 @@ func pollID(manifest protocol.Manifest) (string, error) {
 	value, err := protocol.HashCanonical(protocol.DomainPollID, unsigned)
 	if err != nil {
 		return "", &Error{Code: "poll_id_failed", Err: err}
+	}
+	return value, nil
+}
+
+func manifestDraftID(manifest protocol.Manifest) (string, error) {
+	identity := draftIdentity{
+		SchemaVersion:               manifest.SchemaVersion,
+		Protocol:                    manifest.Protocol,
+		EligibilityScheme:           manifest.EligibilityScheme,
+		Question:                    manifest.Question,
+		Choices:                     append([]protocol.Choice(nil), manifest.Choices...),
+		Trustees:                    manifest.Trustees,
+		PrivacyThreshold:            manifest.PrivacyThreshold,
+		OpensAt:                     manifest.OpensAt,
+		ClosesAt:                    manifest.ClosesAt,
+		AuthorityKey:                manifest.AuthorityKey,
+		ExperimentalNotForElections: manifest.ExperimentalNotForElections,
+	}
+	value, err := protocol.HashCanonical(protocol.DomainPollDraftID, identity)
+	if err != nil {
+		return "", &Error{Code: "draft_id_failed", Err: err}
 	}
 	return value, nil
 }

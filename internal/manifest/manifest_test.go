@@ -71,7 +71,7 @@ func TestFreezeIsCanonicalAndImmutable(t *testing.T) {
 
 	manifest.Question = "mutated"
 	manifest.Choices[0].Label = "mutated"
-	if err := Verify(manifest); ErrorCode(err) != "poll_id_mismatch" {
+	if err := Verify(manifest); ErrorCode(err) != "poll_draft_id_mismatch" {
 		t.Fatalf("mutated manifest error = %v", err)
 	}
 	if first.Manifest().Question == "mutated" || first.Manifest().Choices[0].Label == "mutated" {
@@ -184,7 +184,7 @@ func TestVerifyRejectsCeremonyMutation(t *testing.T) {
 	}
 	manifest := frozen.Manifest()
 	manifest.Trustees.ElectionPublicKey = "ristretto255:" + fmt.Sprintf("%064x", 1)
-	if err := Verify(manifest); ErrorCode(err) != "election_key_mismatch" {
+	if err := Verify(manifest); ErrorCode(err) != "poll_draft_id_mismatch" {
 		t.Fatalf("election key error = %v", err)
 	}
 }

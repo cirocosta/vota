@@ -3,6 +3,7 @@
     "schema_version": 1,
     "protocol": "vota-v1-experimental",
     "eligibility_scheme": "ring-v1",
+    "poll_draft_id": "sha256:3030303030303030303030303030303030303030303030303030303030303030",
     "poll_id": "sha256:3030303030303030303030303030303030303030303030303030303030303030",
     "question": "Choose a release color",
     "choices": [

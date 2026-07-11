@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"encoding/hex"
 
 	"github.com/cirocosta/vota/internal/manifest"
 	"github.com/cirocosta/vota/internal/protocol"
@@ -9,9 +10,10 @@ import (
 )
 
 type PollStatus struct {
-	Manifest   protocol.Manifest   `json:"manifest"`
-	State      string              `json:"state"`
-	Checkpoint protocol.Checkpoint `json:"checkpoint"`
+	Manifest      protocol.Manifest   `json:"manifest"`
+	State         string              `json:"state"`
+	Checkpoint    protocol.Checkpoint `json:"checkpoint"`
+	CheckpointKey string              `json:"checkpoint_key"`
 }
 
 func (service *Service) Ready(ctx context.Context) error {
@@ -38,5 +40,10 @@ func (service *Service) PollStatus(ctx context.Context, pollID string) (PollStat
 	if err := protocol.DecodeStrict(checkpointRecord.Artifact, &checkpoint); err != nil {
 		return PollStatus{}, &Error{Code: "invalid_stored_checkpoint", Err: err}
 	}
-	return PollStatus{Manifest: frozen.Manifest(), State: poll.State, Checkpoint: checkpoint}, nil
+	return PollStatus{
+		Manifest:      frozen.Manifest(),
+		State:         poll.State,
+		Checkpoint:    checkpoint,
+		CheckpointKey: "ed25519:" + hex.EncodeToString(service.CheckpointPublicKey()),
+	}, nil
 }

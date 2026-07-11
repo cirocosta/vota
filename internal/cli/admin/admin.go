@@ -153,7 +153,7 @@ func newPollCreateCommand(options Options) *cobra.Command {
 				AuthorityKey:  "ed25519:" + hex.EncodeToString(privateKey.Public().(ed25519.PublicKey)),
 				Enrollments:   []protocol.Enrollment{},
 			}
-			if _, err := manifest.DraftID(toManifestDraft(draft)); err != nil {
+			if _, err := manifest.DraftID(ManifestDraft(draft)); err != nil {
 				return err
 			}
 			encoded, err := protocol.MarshalCanonical(draft)
@@ -196,7 +196,7 @@ func newEligibleCommand(options Options) *cobra.Command {
 			if err := readStrict(enrollmentPath, &enrollment); err != nil {
 				return err
 			}
-			draftID, err := manifest.DraftID(toManifestDraft(draft))
+			draftID, err := manifest.DraftID(ManifestDraft(draft))
 			if err != nil {
 				return err
 			}
@@ -258,7 +258,7 @@ func newFreezeCommand(options Options) *cobra.Command {
 				return err
 			}
 			defer clear(privateKey)
-			frozen, err := manifest.Freeze(toManifestDraft(draft), privateKey)
+			frozen, err := manifest.Freeze(ManifestDraft(draft), privateKey)
 			if err != nil {
 				return err
 			}
@@ -406,7 +406,8 @@ func newCloseCommand(options Options) *cobra.Command {
 	return command
 }
 
-func toManifestDraft(draft DraftFile) manifest.Draft {
+// ManifestDraft converts a public draft file into the validated manifest input.
+func ManifestDraft(draft DraftFile) manifest.Draft {
 	trustees := make([]manifest.Trustee, len(draft.Config.Trustees))
 	for index, trustee := range draft.Config.Trustees {
 		signingKey, _ := decodeValue(trustee.SigningKey, "ed25519", ed25519.PublicKeySize)

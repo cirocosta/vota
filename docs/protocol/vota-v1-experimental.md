@@ -33,7 +33,8 @@ identity contains the schema and protocol versions, eligibility scheme,
 question, choices, trustee IDs, signing keys and ceremony commitments, quorum,
 election public key, privacy threshold, normalized UTC window, authority key,
 and experimental warning. It excludes enrollments. Choices and trustees are
-sorted by ID before hashing.
+sorted by ID before hashing. The frozen manifest carries this value as
+`poll_draft_id`, and verifiers recompute it from the signed manifest fields.
 
 The poll ID is SHA-256 over `vota:v1:poll-id`, a zero byte, and the RFC 8785
 canonical manifest with `poll_id` and `authority_signature` set to empty strings.

@@ -21,6 +21,7 @@ type Manifest struct {
 	SchemaVersion               int        `json:"schema_version"`
 	Protocol                    string     `json:"protocol"`
 	EligibilityScheme           string     `json:"eligibility_scheme"`
+	PollDraftID                 string     `json:"poll_draft_id"`
 	PollID                      string     `json:"poll_id"`
 	Question                    string     `json:"question"`
 	Choices                     []Choice   `json:"choices"`

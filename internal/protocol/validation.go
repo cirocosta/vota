@@ -50,6 +50,9 @@ func ValidateManifest(manifest Manifest) error {
 	if manifest.EligibilityScheme != EligibilityScheme {
 		return validationError("unsupported_eligibility_scheme", "eligibility_scheme", manifest.EligibilityScheme)
 	}
+	if err := validateEncoded("sha256", 32, manifest.PollDraftID); err != nil {
+		return validationError("invalid_poll_draft_id", "poll_draft_id", err.Error())
+	}
 	if !manifest.ExperimentalNotForElections {
 		return validationError("missing_experimental_warning", "experimental_not_for_real_elections", "must be true")
 	}
