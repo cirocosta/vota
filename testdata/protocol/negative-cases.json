@@ -1,0 +1,38 @@
+[
+  {
+    "name": "malformed_point",
+    "artifact": "manifest",
+    "mutation": "eligible_keys[0]=ristretto255:00",
+    "expected_code": "invalid_eligibility_key"
+  },
+  {
+    "name": "duplicate_eligibility_key",
+    "artifact": "manifest",
+    "mutation": "eligible_keys[1]=eligible_keys[0]",
+    "expected_code": "duplicate_eligibility_key"
+  },
+  {
+    "name": "invalid_choice_proof",
+    "artifact": "ballot",
+    "mutation": "validity_proof=vota-choice-proof-v1:zz",
+    "expected_code": "invalid_ballot_field"
+  },
+  {
+    "name": "duplicate_nullifier",
+    "artifact": "election",
+    "mutation": "ballots[1].nullifier=ballots[0].nullifier",
+    "expected_code": "double_vote"
+  },
+  {
+    "name": "wrong_manifest",
+    "artifact": "ballot",
+    "mutation": "manifest_hash=sha256:ff...ff",
+    "expected_code": "wrong_manifest"
+  },
+  {
+    "name": "wrong_aggregate_hash",
+    "artifact": "trustee_share",
+    "mutation": "aggregate_hash=sha256:ff...ff",
+    "expected_code": "wrong_aggregate"
+  }
+]
