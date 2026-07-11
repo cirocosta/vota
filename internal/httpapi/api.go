@@ -197,10 +197,6 @@ func (api *API) getPoll(response http.ResponseWriter, request *http.Request) {
 }
 
 func (api *API) submitBallot(response http.ResponseWriter, request *http.Request) {
-	if !api.acquireVerification(response, request) {
-		return
-	}
-	defer api.releaseVerification()
 	body, ok := api.readJSONBody(response, request)
 	if !ok {
 		return
@@ -213,6 +209,10 @@ func (api *API) submitBallot(response http.ResponseWriter, request *http.Request
 		api.writeError(response, http.StatusUnprocessableEntity, "wrong_poll", requestID(request))
 		return
 	}
+	if !api.acquireVerification(response, request) {
+		return
+	}
+	defer api.releaseVerification()
 	receipt, created, err := api.service.AcceptBallot(request.Context(), ballot)
 	if err != nil {
 		api.writeAppError(response, request, err)
@@ -248,10 +248,6 @@ func (api *API) closePoll(response http.ResponseWriter, request *http.Request) {
 }
 
 func (api *API) submitShare(response http.ResponseWriter, request *http.Request) {
-	if !api.acquireVerification(response, request) {
-		return
-	}
-	defer api.releaseVerification()
 	body, ok := api.readJSONBody(response, request)
 	if !ok {
 		return
@@ -264,6 +260,10 @@ func (api *API) submitShare(response http.ResponseWriter, request *http.Request)
 		api.writeError(response, http.StatusUnprocessableEntity, "wrong_poll", requestID(request))
 		return
 	}
+	if !api.acquireVerification(response, request) {
+		return
+	}
+	defer api.releaseVerification()
 	tally, created, err := api.service.SubmitTrusteeShare(request.Context(), share)
 	if err != nil {
 		api.writeAppError(response, request, err)

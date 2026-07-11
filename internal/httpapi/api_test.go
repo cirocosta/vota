@@ -223,6 +223,68 @@ func TestVerificationConcurrencyLimit(t *testing.T) {
 	}
 }
 
+func TestIncompleteBodyDoesNotConsumeVerificationSlot(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{name: "ballot", path: "/v1/polls/%s/ballots"},
+		{name: "trustee share", path: "/v1/polls/%s/tally-shares"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			api, service, _ := testAPI(t, Config{VerificationConcurrency: 1})
+			value := fixtureManifest(t)
+			if _, _, err := service.PublishPoll(context.Background(), mustCanonical(t, value)); err != nil {
+				t.Fatal(err)
+			}
+
+			body := &blockingRequestBody{
+				entered: make(chan struct{}),
+				release: make(chan struct{}),
+			}
+			blockedRequest := httptest.NewRequest(http.MethodPost, fmt.Sprintf(test.path, value.PollID), body)
+			blockedRequest.Header.Set("Content-Type", "application/json")
+			blockedResponse := httptest.NewRecorder()
+			blockedDone := make(chan int, 1)
+			go func() {
+				api.ServeHTTP(blockedResponse, blockedRequest)
+				blockedDone <- blockedResponse.Code
+			}()
+
+			select {
+			case <-body.entered:
+			case <-time.After(time.Second):
+				close(body.release)
+				t.Fatal("timed out waiting for blocked body read")
+			}
+
+			active := api.Metrics().ActiveVerifications
+			ballotRequest := httptest.NewRequest(
+				http.MethodPost,
+				"/v1/polls/"+value.PollID+"/ballots",
+				bytes.NewReader(mustCanonical(t, fixtureBallot(t))),
+			)
+			ballotRequest.Header.Set("Content-Type", "application/json")
+			ballotResponse := httptest.NewRecorder()
+			api.ServeHTTP(ballotResponse, ballotRequest)
+
+			close(body.release)
+			blockedStatus := <-blockedDone
+
+			if active != 0 {
+				t.Fatalf("active verifications during body read = %d, want 0", active)
+			}
+			if ballotResponse.Code != http.StatusCreated {
+				t.Fatalf("ballot status = %d, want %d", ballotResponse.Code, http.StatusCreated)
+			}
+			if blockedStatus != http.StatusUnprocessableEntity {
+				t.Fatalf("blocked status = %d, want %d", blockedStatus, http.StatusUnprocessableEntity)
+			}
+		})
+	}
+}
+
 func TestLogsAndMetricsExcludeSensitiveFields(t *testing.T) {
 	var logs bytes.Buffer
 	logger := slog.New(slog.NewJSONHandler(&logs, nil))
@@ -414,6 +476,18 @@ func httpErrorStatusCode(err error) string {
 		return fmt.Sprintf("%d:%s", typed.Status, typed.Code)
 	}
 	return ""
+}
+
+type blockingRequestBody struct {
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (body *blockingRequestBody) Read([]byte) (int, error) {
+	body.once.Do(func() { close(body.entered) })
+	<-body.release
+	return 0, io.EOF
 }
 
 func fixtureCredential(tb testing.TB, value protocol.Manifest, seed string) (lrs.PrivateKey, int) {
