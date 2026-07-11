@@ -197,8 +197,16 @@ func encrypt(x [curve25519.PointSize]byte, data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	nonce := make([]byte, chacha20poly1305.NonceSize)
-	return aead.Seal(nil, nonce, data, nil), nil
+	nonce := make(
+		[]byte,
+		chacha20poly1305.NonceSize,
+		chacha20poly1305.NonceSize+len(data)+aead.Overhead(),
+	)
+	if _, err := rand.Read(nonce); err != nil {
+		return nil, fmt.Errorf("generate nonce: %w", err)
+	}
+
+	return aead.Seal(nonce, nonce, data, nil), nil
 }
 
 func decrypt(x [curve25519.PointSize]byte, data []byte) ([]byte, error) {
@@ -207,8 +215,16 @@ func decrypt(x [curve25519.PointSize]byte, data []byte) ([]byte, error) {
 		return nil, err
 	}
 
-	nonce := make([]byte, chacha20poly1305.NonceSize)
-	return aead.Open(nil, nonce, data, nil)
+	if len(data) < chacha20poly1305.NonceSize {
+		return nil, fmt.Errorf(
+			"ciphertext too short: got %d bytes, need at least %d",
+			len(data),
+			chacha20poly1305.NonceSize,
+		)
+	}
+
+	nonce, ciphertext := data[:chacha20poly1305.NonceSize], data[chacha20poly1305.NonceSize:]
+	return aead.Open(nil, nonce, ciphertext, nil)
 }
 
 func example_simple_diffiehellman_enc_dec() {
