@@ -48,7 +48,7 @@ func TestRootWiresRoleAndServerCommands(t *testing.T) {
 		names = append(names, child.Name())
 	}
 	slices.Sort(names)
-	want := []string{"admin", "identity", "poll", "serve", "tally", "trustee", "version", "vote"}
+	want := []string{"admin", "audit", "identity", "poll", "serve", "tally", "trustee", "version", "vote"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("commands = %v, want %v", names, want)
 	}

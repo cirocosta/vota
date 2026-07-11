@@ -205,7 +205,7 @@ func hashValue(value string) string {
 func TestBundleFieldInventory(t *testing.T) {
 	t.Parallel()
 
-	fields := []string{"schema_version", "protocol", "manifest", "events", "checkpoints"}
+	fields := []string{"schema_version", "protocol", "checkpoint_key", "manifest", "events", "ballots", "aggregate", "shares", "tally", "checkpoints"}
 	slices.Sort(fields)
 	encoded, err := protocol.MarshalCanonical(Bundle{})
 	if err != nil {

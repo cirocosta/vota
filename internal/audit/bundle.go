@@ -2,22 +2,36 @@ package audit
 
 import (
 	"crypto/ed25519"
+	"encoding/hex"
 	"fmt"
+	"strings"
 
 	"github.com/cirocosta/vota/internal/manifest"
 	"github.com/cirocosta/vota/internal/protocol"
 )
 
 type Bundle struct {
-	SchemaVersion int                   `json:"schema_version"`
-	Protocol      string                `json:"protocol"`
-	Manifest      protocol.Manifest     `json:"manifest"`
-	Events        []protocol.AuditEvent `json:"events"`
-	Checkpoints   []protocol.Checkpoint `json:"checkpoints"`
+	SchemaVersion int                          `json:"schema_version"`
+	Protocol      string                       `json:"protocol"`
+	CheckpointKey string                       `json:"checkpoint_key"`
+	Manifest      protocol.Manifest            `json:"manifest"`
+	Events        []protocol.AuditEvent        `json:"events"`
+	Ballots       []protocol.BallotEnvelope    `json:"ballots"`
+	Aggregate     *protocol.EncryptedAggregate `json:"aggregate"`
+	Shares        []protocol.TrusteeShare      `json:"shares"`
+	Tally         *protocol.Tally              `json:"tally"`
+	Checkpoints   []protocol.Checkpoint        `json:"checkpoints"`
 }
 
 // Export verifies and canonicalizes a public audit-chain bundle.
 func Export(bundle Bundle, checkpointKey ed25519.PublicKey) ([]byte, error) {
+	bundle.CheckpointKey = "ed25519:" + hex.EncodeToString(checkpointKey)
+	if bundle.Ballots == nil {
+		bundle.Ballots = []protocol.BallotEnvelope{}
+	}
+	if bundle.Shares == nil {
+		bundle.Shares = []protocol.TrusteeShare{}
+	}
 	if err := VerifyBundle(bundle, checkpointKey); err != nil {
 		return nil, err
 	}
@@ -29,10 +43,17 @@ func Export(bundle Bundle, checkpointKey ed25519.PublicKey) ([]byte, error) {
 }
 
 // ParseBundle strictly decodes and verifies an exported bundle.
-func ParseBundle(encoded []byte, checkpointKey ed25519.PublicKey) (Bundle, error) {
+func ParseBundle(encoded []byte, expectedKeys ...ed25519.PublicKey) (Bundle, error) {
 	var bundle Bundle
 	if err := protocol.DecodeStrict(encoded, &bundle); err != nil {
 		return Bundle{}, &Error{Code: "invalid_audit_bundle", Err: err}
+	}
+	checkpointKey, err := bundleCheckpointKey(bundle)
+	if err != nil {
+		return Bundle{}, err
+	}
+	if len(expectedKeys) > 1 || (len(expectedKeys) == 1 && !checkpointKey.Equal(expectedKeys[0])) {
+		return Bundle{}, &Error{Code: "checkpoint_key_mismatch"}
 	}
 	if err := VerifyBundle(bundle, checkpointKey); err != nil {
 		return Bundle{}, err
@@ -44,6 +65,13 @@ func ParseBundle(encoded []byte, checkpointKey ed25519.PublicKey) (Bundle, error
 func VerifyBundle(bundle Bundle, checkpointKey ed25519.PublicKey) error {
 	if bundle.SchemaVersion != protocol.SchemaVersion || bundle.Protocol != protocol.ProtocolVersion {
 		return &Error{Code: "invalid_audit_bundle"}
+	}
+	embeddedKey, err := bundleCheckpointKey(bundle)
+	if err != nil {
+		return err
+	}
+	if !embeddedKey.Equal(checkpointKey) {
+		return &Error{Code: "checkpoint_key_mismatch"}
 	}
 	if err := manifest.Verify(bundle.Manifest); err != nil {
 		return &Error{Code: "invalid_manifest", Err: err}
@@ -76,4 +104,13 @@ func VerifyBundle(bundle Bundle, checkpointKey ed25519.PublicKey) error {
 		return &Error{Code: "checkpoint_chain_mismatch"}
 	}
 	return nil
+}
+
+func bundleCheckpointKey(bundle Bundle) (ed25519.PublicKey, error) {
+	payload, ok := strings.CutPrefix(bundle.CheckpointKey, "ed25519:")
+	decoded, err := hex.DecodeString(payload)
+	if !ok || err != nil || len(decoded) != ed25519.PublicKeySize {
+		return nil, &Error{Code: "invalid_checkpoint_key"}
+	}
+	return ed25519.PublicKey(decoded), nil
 }

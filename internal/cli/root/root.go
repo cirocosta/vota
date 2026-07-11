@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/cirocosta/vota/internal/cli/admin"
+	"github.com/cirocosta/vota/internal/cli/auditcmd"
 	"github.com/cirocosta/vota/internal/cli/server"
 	"github.com/cirocosta/vota/internal/cli/trustee"
 	"github.com/cirocosta/vota/internal/cli/voter"
@@ -42,6 +43,7 @@ func New(info BuildInfo) *cobra.Command {
 	cmd.AddCommand(admin.Commands(admin.Options{})...)
 	cmd.AddCommand(voter.Commands(voter.Options{})...)
 	cmd.AddCommand(trustee.Commands(trustee.Options{})...)
+	cmd.AddCommand(auditcmd.Command(auditcmd.Options{}))
 	cmd.AddCommand(server.Command(server.Options{}))
 	return cmd
 }
