@@ -187,6 +187,20 @@ func (service *Service) SubmitTrusteeShare(ctx context.Context, share protocol.T
 func (service *Service) Tally(ctx context.Context, pollID string) (protocol.Tally, error) {
 	record, err := service.store.Tally(ctx, pollID)
 	if err != nil {
+		if store.ErrorCode(err) == "tally_not_found" {
+			poll, pollErr := service.store.Poll(ctx, pollID)
+			if pollErr != nil {
+				return protocol.Tally{}, &Error{Code: store.ErrorCode(pollErr), Err: pollErr}
+			}
+			if len(poll.Aggregate) > 0 {
+				frozen, manifestErr := manifest.Parse(poll.Manifest)
+				aggregate, aggregateErr := ParseAggregate(poll.Aggregate)
+				if manifestErr == nil && aggregateErr == nil && aggregate.BallotCount < frozen.Manifest().PrivacyThreshold {
+					return protocol.Tally{}, &Error{Code: "privacy_threshold_not_met"}
+				}
+			}
+			return protocol.Tally{}, &Error{Code: "tally_unavailable"}
+		}
 		return protocol.Tally{}, &Error{Code: store.ErrorCode(err), Err: err}
 	}
 	var tally protocol.Tally

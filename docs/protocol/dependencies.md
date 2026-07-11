@@ -3,6 +3,15 @@
 This record covers dependencies selected before cryptographic implementation.
 Versions are pinned in `go.mod` and must be re-reviewed when updated.
 
+## Go toolchain
+
+- Language version: Go 1.26
+- Minimum pinned toolchain: Go 1.26.5
+- Reason for patch pin: Go 1.26.0 through 1.26.4 contain `GO-2026-5856` in
+  `crypto/tls`; Vota's HTTP client reaches the affected handshake path
+- Verification: the full test, race, vet, build, staticcheck, and govulncheck
+  suite passes with Go 1.26.5 and reports zero reachable vulnerabilities
+
 ## Cobra
 
 - Module: `github.com/spf13/cobra`

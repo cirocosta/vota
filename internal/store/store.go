@@ -128,6 +128,13 @@ func (store *Store) Close() error {
 	return nil
 }
 
+func (store *Store) Ping(ctx context.Context) error {
+	if err := store.db.PingContext(ctx); err != nil {
+		return &Error{Code: "database_unavailable", Err: err}
+	}
+	return nil
+}
+
 // Transaction commits all writes together or rolls them all back.
 func (store *Store) Transaction(ctx context.Context, operation func(*Tx) error) error {
 	return store.transaction(ctx, operation, nil)
