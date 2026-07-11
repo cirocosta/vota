@@ -178,14 +178,18 @@ func newkp() *keypair {
 	return kp
 }
 
-func (p *keypair) dh(C [curve25519.PointSize]byte) [curve25519.PointSize]byte {
+func (p *keypair) dh(C [curve25519.PointSize]byte) ([curve25519.PointSize]byte, error) {
 	var D [curve25519.PointSize]byte
 
 	// deriving shared point `D` (D = xC)
 	// i.e., our_priv * peer_pub
-	curve25519.ScalarMult(&D, &p.x, &C)
+	shared, err := curve25519.X25519(p.x[:], C[:])
+	if err != nil {
+		return D, fmt.Errorf("derive shared secret: %w", err)
+	}
+	copy(D[:], shared)
 
-	return D
+	return D, nil
 }
 
 func (p *keypair) String() string {
@@ -228,24 +232,37 @@ func decrypt(x [curve25519.PointSize]byte, data []byte) ([]byte, error) {
 	return aead.Open(nil, nonce, ciphertext, nil)
 }
 
-func example_simple_diffiehellman_enc_dec() {
+func example_simple_diffiehellman_enc_dec() error {
 	alice := newkp()
 	bob := newkp()
 
 	fmt.Println("alice", "\n", alice)
 	fmt.Println("bob", "\n", bob)
 
-	da := alice.dh(bob.P)
-	db := bob.dh(alice.P)
+	da, err := alice.dh(bob.P)
+	if err != nil {
+		return fmt.Errorf("alice key agreement: %w", err)
+	}
+	db, err := bob.dh(alice.P)
+	if err != nil {
+		return fmt.Errorf("bob key agreement: %w", err)
+	}
 
 	for _, v := range [][curve25519.PointSize]byte{da, db} {
 		fmt.Printf("shared:\t\t%x\n", v)
 	}
 
-	ct, _ := encrypt(da, []byte("foo"))
-	t, _ := decrypt(db, ct)
+	ct, err := encrypt(da, []byte("foo"))
+	if err != nil {
+		return fmt.Errorf("encrypt message: %w", err)
+	}
+	t, err := decrypt(db, ct)
+	if err != nil {
+		return fmt.Errorf("decrypt message: %w", err)
+	}
 
 	fmt.Println(string(t))
+	return nil
 }
 
 func main() {
