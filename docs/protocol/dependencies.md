@@ -46,8 +46,17 @@ Versions are pinned in `go.mod` and must be re-reviewed when updated.
   vectors, every-position ring tests, mutation tests, fuzzing, race checks, and
   benchmarks through ring size 256
 
-## Pending selections
+## SQLite
 
-The SQLite dependency remains unselected. Its implementation task must record
-version, license, maintenance state, known audit status, vulnerability scan,
-and API rationale before adding it to `go.mod`.
+- Module: `modernc.org/sqlite`
+- Version at selection: `v1.53.0`
+- License: BSD-3-Clause; bundled SQLite is public domain
+- Purpose: `database/sql` SQLite driver for transactional collector state
+- Repository activity checked: 2026-07-11; `v1.53.0` was published 2026-06-21
+- CGO: not required
+- Audit status: no driver-specific independent audit identified
+- Selection rationale: pure-Go Linux and macOS builds, current tagged release,
+  connection-level pragma support, and standard `database/sql` integration
+- Compensating evidence: migration replay, foreign-key checks, deferred ballot
+  and event constraints, fault injection, 50-writer uniqueness tests, race
+  tests, and vulnerability reachability scanning
