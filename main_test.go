@@ -26,6 +26,40 @@ func TestHSMatchesMoneroHashToScalar(t *testing.T) {
 	}
 }
 
+func TestDHRejectsLowOrderPublicKey(t *testing.T) {
+	t.Parallel()
+
+	kp := newkp()
+	var lowOrderPoint [32]byte
+	_, err := kp.dh(lowOrderPoint)
+	if err == nil {
+		t.Fatal("dh returned nil error for a low-order public key")
+	}
+}
+
+func TestDHMatchesPeer(t *testing.T) {
+	t.Parallel()
+
+	alice := newkp()
+	bob := newkp()
+
+	aliceShared, err := alice.dh(bob.P)
+	if err != nil {
+		t.Fatalf("alice dh: %v", err)
+	}
+	bobShared, err := bob.dh(alice.P)
+	if err != nil {
+		t.Fatalf("bob dh: %v", err)
+	}
+
+	if aliceShared != bobShared {
+		t.Fatalf("shared secrets differ: alice %x, bob %x", aliceShared, bobShared)
+	}
+	if aliceShared == ([32]byte{}) {
+		t.Fatal("valid peers derived an all-zero shared secret")
+	}
+}
+
 func TestEncryptUsesUniqueNonce(t *testing.T) {
 	t.Parallel()
 
