@@ -1,24 +1,23 @@
 /*
 ecc rules:
 
-	- point on the curve can be added to or subtracted from another point
-	  or itself
-	- a point cacnnot be multipled or divided by another point
-
+  - point on the curve can be added to or subtracted from another point
+    or itself
+  - a point cacnnot be multipled or divided by another point
 
 notation:
 
-	- lowercase 'x': scalar (priv key)
-	- uppercase 'P': public key
-	- uppercase 'G': base / generator point
+  - lowercase 'x': scalar (priv key)
 
-	(overall, lowercase == scalar, uppercase == point)
+  - uppercase 'P': public key
 
+  - uppercase 'G': base / generator point
+
+    (overall, lowercase == scalar, uppercase == point)
 
 public key from private key:
 
 	P = xG		(scalar mult of `x` over the base G)
-
 
 ecdh (elliptic curve diffie-hellman):
 
@@ -34,7 +33,6 @@ ecdh (elliptic curve diffie-hellman):
 			  but that's only known if we know both private keys,
 			  which is not the case in a normal setup where you're
 			  either alice _or_ bob.
-
 
 dual-key stealth addr:
 
@@ -94,8 +92,6 @@ dual-key stealth addr:
 	note.: a view wallet requires (a,B), i.e., the private view key and the
 	public spend key - in wallet-rpc, `B` comes from the primary address of
 	the wallet.
-
-
 */
 package main
 
@@ -130,7 +126,6 @@ type keypair struct {
 // where
 //
 // Hs == result of keccak over `rA` interpreted as a scalar mod l
-//
 func hs(D [curve25519.PointSize]byte) [curve25519.PointSize]byte {
 	acc := keccak()
 	_, _ = acc.Write(D[:]) // hash.Hash.Write always returns len(p), nil
@@ -232,7 +227,7 @@ func decrypt(x [curve25519.PointSize]byte, data []byte) ([]byte, error) {
 	return aead.Open(nil, nonce, ciphertext, nil)
 }
 
-func example_simple_diffiehellman_enc_dec() error {
+func exampleSimpleDiffieHellmanEncryption() error {
 	alice := newkp()
 	bob := newkp()
 
@@ -294,6 +289,10 @@ func run() error {
 }
 
 func main() {
+	if err := exampleSimpleDiffieHellmanEncryption(); err != nil {
+		fmt.Fprintf(os.Stderr, "Diffie-Hellman example: %v\n", err)
+		os.Exit(1)
+	}
 	if err := run(); err != nil {
 		fmt.Fprintf(os.Stderr, "stealth address example: %v\n", err)
 		os.Exit(1)
