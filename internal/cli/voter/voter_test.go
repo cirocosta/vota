@@ -144,9 +144,10 @@ func TestDefaultChoiceReaderUsesTerminalWithoutEcho(t *testing.T) {
 		selected int
 		err      error
 	}
+	value := fixtureManifest(t)
 	readDone := make(chan result, 1)
 	go func() {
-		selected, readErr := defaultReadChoice(fixtureManifest(t))
+		selected, readErr := defaultReadChoice(value)
 		readDone <- result{selected: selected, err: readErr}
 	}()
 	time.Sleep(10 * time.Millisecond)
@@ -158,8 +159,8 @@ func TestDefaultChoiceReaderUsesTerminalWithoutEcho(t *testing.T) {
 		t.Fatalf("read terminal choice: %v", read.err)
 	}
 	selected := read.selected
-	if fixtureManifest(t).Choices[selected].ID != "green" {
-		t.Fatalf("selected choice = %s", fixtureManifest(t).Choices[selected].ID)
+	if value.Choices[selected].ID != "green" {
+		t.Fatalf("selected choice = %s", value.Choices[selected].ID)
 	}
 	_ = terminal.Close()
 	buffer := make([]byte, 128)
