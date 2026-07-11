@@ -7,7 +7,8 @@ suitable for real elections.
 
 Public artifacts are JSON canonicalized with RFC 8785 before hashing or signing.
 Duplicate object keys, unknown fields, multiple JSON values, non-canonical group
-encodings, and artifacts larger than 1 MiB are rejected. Binary values use a
+encodings, and individual artifacts larger than 1 MiB are rejected. A complete
+audit record has a separate 32 MiB container limit. Binary values use a
 lowercase hexadecimal payload with a type prefix, such as
 `ristretto255:<64 hex characters>`.
 
@@ -23,7 +24,8 @@ followed by the bytes. Fixed-size group elements and scalars use their canonical
 element. Implementations must not concatenate ambiguous variable-length fields.
 
 The complete domain registry is the ordered result of
-`protocol.DomainSeparators()`. Unknown domains fail closed.
+`protocol.DomainSeparators()`. Tests require every registered value to be
+unique.
 
 ## Poll manifest
 
@@ -81,11 +83,11 @@ The link tag is:
 I = x * Hp(vota:v1:ring-hash-to-group, P[j])
 ```
 
-Per-poll keys make this standard link tag poll-local without changing the
-hash-to-group or linking equations. Reusing an eligibility private key in a
-different poll would make participation linkable and is rejected by identity
-and manifest workflows. The poll ID, ballot choice, and encryption randomness
-are not inputs to `I`.
+The CLI creates identity files bound to one draft, making ordinary use
+poll-local without changing the hash-to-group or linking equations. The
+protocol cannot prevent deliberate reuse of one eligibility scalar in another
+poll. Reuse produces the same link tag and links participation. The poll ID,
+ballot choice, and encryption randomness are not inputs to `I`.
 
 The signed message is the ballot hash. Challenges bind protocol, poll ID,
 manifest hash, canonical ring hash, ballot hash, `I`, and every reconstructed
@@ -178,7 +180,8 @@ relates its public share and `D_i`. A quorum combines shares with Lagrange
 coefficients to recover `M = B - yA`. Because `M = total * G` and the total is
 bounded by 256, the verifier finds the integer total by a bounded table lookup.
 
-Trustee APIs accept a closed aggregate artifact only. No supported operation
+The collector emits an aggregate only when it closes a poll. The trustee CLI
+accepts a signed manifest and a valid aggregate artifact. No supported command
 creates a decryption share for an individual ballot.
 
 The share equality proof uses bases `G` and `A`, statements `Y_i` and `D_i`,
@@ -224,7 +227,8 @@ not prevent collector censorship or equivocation.
 ## Failure rules
 
 - Unknown versions, suites, schemes, encodings, and domains fail closed.
-- Invalid public inputs return errors and never panic.
+- Public parsers and verification entry points return structured errors; fuzz
+  tests exercise malformed binary artifacts.
 - Cheap size and encoding checks run before proof verification.
 - Duplicate nullifiers reject a conflicting ballot; byte-identical resubmission
   returns the original receipt.

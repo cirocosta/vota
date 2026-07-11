@@ -37,17 +37,16 @@ Versions are pinned in `go.mod` and must be re-reviewed when updated.
 - Purpose: RFC 8785 canonical JSON transformation
 - Repository activity checked: 2026-07-11; repository updated in 2026
 - Audit status: no independent audit identified
-- Compensating evidence: RFC examples, local deterministic fixtures, duplicate
-  field rejection before canonicalization, and differential tests required for
-  every signed artifact
+- Compensating evidence: canonical ordering tests, deterministic signed
+  fixtures, and duplicate-field rejection before canonicalization
 
 ## Go cryptography extensions
 
 - Module: `golang.org/x/crypto`
 - Version at selection: `v0.54.0`
 - License: BSD-3-Clause
-- Purpose: legacy Keccak in the preserved example; future Argon2id and
-  XChaCha20-Poly1305 keystores
+- Purpose: legacy Keccak in the preserved example plus Argon2id and
+  XChaCha20-Poly1305 key protection
 - Security boundary: use only documented exported primitives; no forked code
 
 ## Ristretto255
@@ -78,3 +77,16 @@ Versions are pinned in `go.mod` and must be re-reviewed when updated.
 - Compensating evidence: migration replay, foreign-key checks, deferred ballot
   and event constraints, fault injection, 50-writer uniqueness tests, race
   tests, and vulnerability reachability scanning
+
+## Configuration and PTY tests
+
+- Module: `gopkg.in/yaml.v3`
+- Version at selection: `v3.0.1`
+- Purpose: strict JSON and YAML collector configuration with known-field checks
+- Module: `github.com/creack/pty`
+- Version at selection: `v1.1.24`
+- Purpose: test-only verification that private choice input uses a no-echo PTY
+
+Trustee ceremony transport uses the Go standard library `crypto/ecdh`,
+`crypto/hkdf`, and `crypto/sha256` packages with XChaCha20-Poly1305 from
+`golang.org/x/crypto`.

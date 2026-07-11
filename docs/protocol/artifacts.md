@@ -1,15 +1,15 @@
 # Vota Public Artifacts
 
-All public artifacts include `schema_version: 1` and
+All versioned protocol artifacts include `schema_version: 1` and
 `protocol: "vota-v1-experimental"`. JSON shown here is descriptive; committed
-fixtures under `testdata/protocol` are authoritative test inputs.
+fixtures under `testdata` are authoritative test inputs.
 
 ## Manifest
 
-The manifest commits the question, ordered choices, canonical eligibility ring,
-trustee quorum and commitments, election public key, privacy threshold, window,
-authority key, and experimental warning. `poll_id` and `authority_signature` are
-derived last.
+The manifest commits the draft ID, question, ordered choices, canonical
+eligibility ring, trustee quorum and commitments, election public key, privacy
+threshold, window, authority key, and experimental warning. `poll_id` and
+`authority_signature` are derived last.
 
 ## Enrollment
 
@@ -36,6 +36,8 @@ contains integer totals and the trustee IDs used to reach quorum.
 
 ## Audit record
 
-An export contains the manifest, ordered events, accepted canonical ballots,
-aggregate, trustee shares, tally when available, and checkpoint signatures. A
-fresh verifier requires no collector database.
+An export contains the checkpoint public key, manifest, ordered events,
+accepted canonical ballots, aggregate when closed, trustee shares, tally when
+available, and checkpoint signatures. A fresh verifier requires no collector
+database. Individual artifacts use a 1 MiB strict decoding limit. The complete
+record container uses a 32 MiB limit because it can contain up to 256 ballots.
