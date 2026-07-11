@@ -1,0 +1,1 @@
+ALTER TABLE ballots ADD COLUMN receipt BLOB;

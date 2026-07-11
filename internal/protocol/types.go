@@ -123,6 +123,7 @@ type Tally struct {
 	Totals        []ChoiceTotal `json:"totals"`
 	TrusteeIDs    []string      `json:"trustee_ids"`
 	EvidenceHash  string        `json:"evidence_hash"`
+	Signature     string        `json:"signature"`
 }
 
 type ReferenceElection struct {

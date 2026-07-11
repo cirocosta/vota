@@ -42,8 +42,16 @@ func (store *Store) BallotByHash(ctx context.Context, pollID, ballotHash string)
 	return ballotByField(ctx, store.db, `ballot_hash`, pollID, ballotHash)
 }
 
+func (tx *Tx) BallotByHash(ctx context.Context, pollID, ballotHash string) (Ballot, error) {
+	return ballotByField(ctx, tx.tx, `ballot_hash`, pollID, ballotHash)
+}
+
 func (store *Store) BallotByNullifier(ctx context.Context, pollID, nullifier string) (Ballot, error) {
 	return ballotByField(ctx, store.db, `nullifier`, pollID, nullifier)
+}
+
+func (tx *Tx) BallotByNullifier(ctx context.Context, pollID, nullifier string) (Ballot, error) {
+	return ballotByField(ctx, tx.tx, `nullifier`, pollID, nullifier)
 }
 
 func (tx *Tx) ballotByNullifier(ctx context.Context, pollID, nullifier string) (Ballot, error) {
@@ -52,8 +60,8 @@ func (tx *Tx) ballotByNullifier(ctx context.Context, pollID, nullifier string) (
 
 func ballotByField(ctx context.Context, query queryer, field, pollID, value string) (Ballot, error) {
 	var ballot Ballot
-	err := query.QueryRowContext(ctx, `SELECT poll_id, ballot_hash, nullifier, artifact, sequence, accepted_at FROM ballots WHERE poll_id = ? AND `+field+` = ?`, pollID, value).Scan(
-		&ballot.PollID, &ballot.BallotHash, &ballot.Nullifier, &ballot.Artifact, &ballot.Sequence, &ballot.AcceptedAt,
+	err := query.QueryRowContext(ctx, `SELECT poll_id, ballot_hash, nullifier, artifact, sequence, accepted_at, receipt FROM ballots WHERE poll_id = ? AND `+field+` = ?`, pollID, value).Scan(
+		&ballot.PollID, &ballot.BallotHash, &ballot.Nullifier, &ballot.Artifact, &ballot.Sequence, &ballot.AcceptedAt, &ballot.Receipt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Ballot{}, &Error{Code: "ballot_not_found"}
@@ -73,7 +81,7 @@ func (tx *Tx) Ballots(ctx context.Context, pollID string) ([]Ballot, error) {
 }
 
 func ballots(ctx context.Context, query queryer, pollID string) ([]Ballot, error) {
-	rows, err := query.QueryContext(ctx, `SELECT poll_id, ballot_hash, nullifier, artifact, sequence, accepted_at FROM ballots WHERE poll_id = ? ORDER BY sequence`, pollID)
+	rows, err := query.QueryContext(ctx, `SELECT poll_id, ballot_hash, nullifier, artifact, sequence, accepted_at, receipt FROM ballots WHERE poll_id = ? ORDER BY sequence`, pollID)
 	if err != nil {
 		return nil, &Error{Code: "ballot_read_failed", Err: err}
 	}
@@ -81,7 +89,7 @@ func ballots(ctx context.Context, query queryer, pollID string) ([]Ballot, error
 	var ballots []Ballot
 	for rows.Next() {
 		var ballot Ballot
-		if err := rows.Scan(&ballot.PollID, &ballot.BallotHash, &ballot.Nullifier, &ballot.Artifact, &ballot.Sequence, &ballot.AcceptedAt); err != nil {
+		if err := rows.Scan(&ballot.PollID, &ballot.BallotHash, &ballot.Nullifier, &ballot.Artifact, &ballot.Sequence, &ballot.AcceptedAt, &ballot.Receipt); err != nil {
 			return nil, &Error{Code: "ballot_read_failed", Err: err}
 		}
 		ballots = append(ballots, ballot)
@@ -143,8 +151,16 @@ func (store *Store) LatestCheckpoint(ctx context.Context, pollID string) (Checkp
 }
 
 func (store *Store) Tally(ctx context.Context, pollID string) (Tally, error) {
+	return tally(ctx, store.db, pollID)
+}
+
+func (tx *Tx) Tally(ctx context.Context, pollID string) (Tally, error) {
+	return tally(ctx, tx.tx, pollID)
+}
+
+func tally(ctx context.Context, query queryer, pollID string) (Tally, error) {
 	var tally Tally
-	err := store.db.QueryRowContext(ctx, `SELECT poll_id, aggregate_hash, evidence_hash, artifact, created_at FROM tallies WHERE poll_id = ?`, pollID).Scan(
+	err := query.QueryRowContext(ctx, `SELECT poll_id, aggregate_hash, evidence_hash, artifact, created_at FROM tallies WHERE poll_id = ?`, pollID).Scan(
 		&tally.PollID, &tally.AggregateHash, &tally.EvidenceHash, &tally.Artifact, &tally.CreatedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -157,7 +173,15 @@ func (store *Store) Tally(ctx context.Context, pollID string) (Tally, error) {
 }
 
 func (store *Store) TrusteeShares(ctx context.Context, pollID string) ([]TrusteeShare, error) {
-	rows, err := store.db.QueryContext(ctx, `SELECT poll_id, trustee_id, aggregate_hash, artifact_hash, artifact, submitted_at FROM trustee_shares WHERE poll_id = ? ORDER BY trustee_id`, pollID)
+	return trusteeShares(ctx, store.db, pollID)
+}
+
+func (tx *Tx) TrusteeShares(ctx context.Context, pollID string) ([]TrusteeShare, error) {
+	return trusteeShares(ctx, tx.tx, pollID)
+}
+
+func trusteeShares(ctx context.Context, query queryer, pollID string) ([]TrusteeShare, error) {
+	rows, err := query.QueryContext(ctx, `SELECT poll_id, trustee_id, aggregate_hash, artifact_hash, artifact, submitted_at FROM trustee_shares WHERE poll_id = ? ORDER BY trustee_id`, pollID)
 	if err != nil {
 		return nil, &Error{Code: "trustee_share_read_failed", Err: err}
 	}
@@ -174,4 +198,32 @@ func (store *Store) TrusteeShares(ctx context.Context, pollID string) ([]Trustee
 		return nil, &Error{Code: "trustee_share_read_failed", Err: err}
 	}
 	return shares, nil
+}
+
+func (store *Store) Checkpoints(ctx context.Context, pollID string) ([]Checkpoint, error) {
+	return checkpoints(ctx, store.db, pollID)
+}
+
+func (tx *Tx) Checkpoints(ctx context.Context, pollID string) ([]Checkpoint, error) {
+	return checkpoints(ctx, tx.tx, pollID)
+}
+
+func checkpoints(ctx context.Context, query queryer, pollID string) ([]Checkpoint, error) {
+	rows, err := query.QueryContext(ctx, `SELECT poll_id, sequence, checkpoint_hash, artifact FROM checkpoints WHERE poll_id = ? ORDER BY sequence`, pollID)
+	if err != nil {
+		return nil, &Error{Code: "checkpoint_read_failed", Err: err}
+	}
+	defer rows.Close()
+	var checkpoints []Checkpoint
+	for rows.Next() {
+		var checkpoint Checkpoint
+		if err := rows.Scan(&checkpoint.PollID, &checkpoint.Sequence, &checkpoint.CheckpointHash, &checkpoint.Artifact); err != nil {
+			return nil, &Error{Code: "checkpoint_read_failed", Err: err}
+		}
+		checkpoints = append(checkpoints, checkpoint)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, &Error{Code: "checkpoint_read_failed", Err: err}
+	}
+	return checkpoints, nil
 }

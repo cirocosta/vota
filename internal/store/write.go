@@ -27,7 +27,7 @@ func (tx *Tx) InsertEvent(ctx context.Context, event Event) error {
 }
 
 func (tx *Tx) InsertBallot(ctx context.Context, ballot Ballot) error {
-	_, err := tx.tx.ExecContext(ctx, `INSERT INTO ballots(poll_id, ballot_hash, nullifier, artifact, sequence, accepted_at) VALUES (?, ?, ?, ?, ?, ?)`, ballot.PollID, ballot.BallotHash, ballot.Nullifier, ballot.Artifact, ballot.Sequence, ballot.AcceptedAt)
+	_, err := tx.tx.ExecContext(ctx, `INSERT INTO ballots(poll_id, ballot_hash, nullifier, artifact, sequence, accepted_at, receipt) VALUES (?, ?, ?, ?, ?, ?, ?)`, ballot.PollID, ballot.BallotHash, ballot.Nullifier, ballot.Artifact, ballot.Sequence, ballot.AcceptedAt, ballot.Receipt)
 	if err != nil {
 		if isConstraint(err) {
 			if existing, lookupErr := tx.ballotByNullifier(ctx, ballot.PollID, ballot.Nullifier); lookupErr == nil && existing.BallotHash != ballot.BallotHash {

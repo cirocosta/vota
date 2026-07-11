@@ -177,10 +177,22 @@ trustee public key, aggregate `A`, aggregate `B`, `D_i`, both bases, both
 statements, and both reconstructed commitments. Shares with a different
 aggregate hash, trustee index, choice count, or proof fail closed.
 
+Each trustee share artifact is signed with that trustee's manifest Ed25519 key.
+The signed bytes are the decryption-share domain, a zero byte, and the
+length-prefixed canonical share with `signature` empty. The public share object
+hash is SHA-256 over the same domain, a zero byte, and the complete signed
+canonical share.
+
 Tally evidence sorts participating trustee indices in ascending order and
 encodes, in order, a version byte, aggregate hash, ballot count, choice count,
 each bounded total, trustee count, and each trustee index. Totals must sum to
 the ballot count before the evidence can be encoded.
+
+The tally evidence hash is SHA-256 over `vota:v1:tally-evidence`, a zero byte,
+and the canonical tally with evidence hash and signature empty. The collector
+signs the 32-byte evidence hash using the same domain and length-delimited
+transcript format. A valid tally must contain one total per manifest choice and
+the totals must sum to the accepted ballot count.
 
 ## Audit chain
 

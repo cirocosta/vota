@@ -63,6 +63,7 @@ type Ballot struct {
 	Artifact   []byte
 	Sequence   uint64
 	AcceptedAt string
+	Receipt    []byte
 }
 
 type Event struct {
