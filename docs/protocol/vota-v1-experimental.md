@@ -90,8 +90,23 @@ A disjunctive Chaum-Pedersen proof under `vota:v1:choice-proof` proves that
 and a second proof under `vota:v1:choice-sum-proof` proves that the sum of all
 positions encrypts exactly one.
 
-The Fiat-Shamir transcript binds the protocol, poll ID, manifest hash, choice
-index, election key, ciphertext, and all proof commitments.
+For each position, define `Q_0 = B` and `Q_1 = B - G`. The proof encodes
+`(c_0, c_1, s_0, s_1)`. Verification reconstructs:
+
+```text
+U_b = s_b G - c_b A
+V_b = s_b Y - c_b Q_b
+```
+
+It then requires `c_0 + c_1` to equal the hash-to-scalar of, in order, the
+domain, poll ID, manifest hash, choice index, election key, `A`, `B`, `U_0`,
+`V_0`, `U_1`, and `V_1`.
+
+For the sum proof, let `A*` and `B*` be the component-wise ciphertext sums and
+`Q* = B* - G`. Its equality proof encodes `(c, s)`, reconstructs
+`U = sG - cA*` and `V = sY - cQ*`, and hashes, in order, the domain, poll ID,
+manifest hash, election key, `A*`, `B*`, bases `G` and `Y`, statements `A*` and
+`Q*`, and commitments `U` and `V`.
 
 ## Ballot envelope
 
@@ -112,6 +127,17 @@ are outside the public artifact. Each recipient verifies its share against the
 commitments. Aggregate public key `Y` is the sum of constant coefficient
 commitments. No combined private key is constructed.
 
+Trustee indices are the integers 1 through `n`. Dealer `d` publishes
+`C_(d,k) = a_(d,k)G` and privately sends `f_d(i)` to trustee `i`. Recipient `i`
+checks:
+
+```text
+f_d(i)G = sum(k=0..quorum-1, i^k C_(d,k))
+```
+
+Its final share is `y_i = sum_d f_d(i)`. Its public share is derived from the
+same commitment equation, without reading any private share.
+
 Accepted ciphertexts are added by choice position. The aggregate artifact binds
 the ordered accepted ballot hashes and summed ciphertexts under
 `vota:v1:aggregate-hash`.
@@ -124,6 +150,18 @@ bounded by 256, the verifier finds the integer total by a bounded table lookup.
 
 Trustee APIs accept a closed aggregate artifact only. No supported operation
 creates a decryption share for an individual ballot.
+
+The share equality proof uses bases `G` and `A`, statements `Y_i` and `D_i`,
+and the same `(c, s)` reconstruction as the sum proof. Its transcript binds, in
+order, the domain, aggregate hash, trustee index, choice index, election key,
+trustee public key, aggregate `A`, aggregate `B`, `D_i`, both bases, both
+statements, and both reconstructed commitments. Shares with a different
+aggregate hash, trustee index, choice count, or proof fail closed.
+
+Tally evidence sorts participating trustee indices in ascending order and
+encodes, in order, a version byte, aggregate hash, ballot count, choice count,
+each bounded total, trustee count, and each trustee index. Totals must sum to
+the ballot count before the evidence can be encoded.
 
 ## Audit chain
 
