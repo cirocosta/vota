@@ -103,6 +103,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"math/big"
+	"os"
 
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
@@ -264,17 +265,17 @@ func example_simple_diffiehellman_enc_dec() error {
 	return nil
 }
 
-func main() {
-
+func run() error {
 	// sending from alice to bob
 	bob_view := newkp()
 	bob_spend := newkp()
 
-	r := random_scalar()
-
 	// D = rA
-	var D [curve25519.PointSize]byte
-	curve25519.ScalarMult(&D, &r, &bob_view.P)
+	sender := &keypair{x: random_scalar()}
+	D, err := sender.dh(bob_view.P)
+	if err != nil {
+		return fmt.Errorf("sender key agreement: %w", err)
+	}
 
 	f := hs(D)
 
@@ -289,4 +290,12 @@ func main() {
 	// - A		public view key
 	// - B		public spend key
 
+	return nil
+}
+
+func main() {
+	if err := run(); err != nil {
+		fmt.Fprintf(os.Stderr, "stealth address example: %v\n", err)
+		os.Exit(1)
+	}
 }
