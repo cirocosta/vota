@@ -111,14 +111,7 @@ import (
 )
 
 var (
-	Lbe = []byte{ // BE
-		0xed, 0xd3, 0xf5, 0x5c, 0x1a, 0x63, 0x12, 0x58,
-		0xd6, 0x9c, 0xf7, 0xa2, 0xde, 0xf9, 0xde, 0x14,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10,
-	}
-
-	Lle = []byte{ // LE
+	ed25519Order = []byte{ // big-endian
 		0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x14, 0xde, 0xf9, 0xde, 0xa2, 0xf7, 0x9c, 0xd6,
@@ -140,17 +133,25 @@ type keypair struct {
 //
 func hs(D [curve25519.PointSize]byte) [curve25519.PointSize]byte {
 	acc := keccak()
-	sum := acc.Sum(D[:])
+	_, _ = acc.Write(D[:]) // hash.Hash.Write always returns len(p), nil
+	digest := acc.Sum(nil)
+	reverse(digest)
 
-	var l, s, f big.Int
-	l.SetBytes(Lbe)
-	s.SetBytes(sum)
-
-	f.Mod(&s, &l)
+	var order, scalar big.Int
+	order.SetBytes(ed25519Order)
+	scalar.SetBytes(digest)
+	scalar.Mod(&scalar, &order)
 
 	res := [curve25519.PointSize]byte{}
-	copy(res[:], f.Bytes()[:32])
+	scalar.FillBytes(res[:])
+	reverse(res[:])
 	return res
+}
+
+func reverse(data []byte) {
+	for left, right := 0, len(data)-1; left < right; left, right = left+1, right-1 {
+		data[left], data[right] = data[right], data[left]
+	}
 }
 
 func random_scalar() [curve25519.ScalarSize]byte {
