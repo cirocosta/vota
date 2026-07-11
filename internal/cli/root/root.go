@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/cirocosta/vota/internal/cli/admin"
+	"github.com/cirocosta/vota/internal/cli/server"
+	"github.com/cirocosta/vota/internal/cli/trustee"
+	"github.com/cirocosta/vota/internal/cli/voter"
 	"github.com/spf13/cobra"
 )
 
@@ -35,6 +39,10 @@ func New(info BuildInfo) *cobra.Command {
 		SilenceUsage:  true,
 	}
 	cmd.AddCommand(newVersionCommand(info))
+	cmd.AddCommand(admin.Commands(admin.Options{})...)
+	cmd.AddCommand(voter.Commands(voter.Options{})...)
+	cmd.AddCommand(trustee.Commands(trustee.Options{})...)
+	cmd.AddCommand(server.Command(server.Options{}))
 	return cmd
 }
 

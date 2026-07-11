@@ -3,6 +3,7 @@ package root
 import (
 	"bytes"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -35,6 +36,21 @@ func TestVersionJSON(t *testing.T) {
 	}
 	if got.Version != "v0.1.0" || got.Commit != "abc123" {
 		t.Errorf("build metadata = %#v", got)
+	}
+}
+
+func TestRootWiresRoleAndServerCommands(t *testing.T) {
+	t.Parallel()
+
+	cmd := New(BuildInfo{})
+	names := make([]string, 0, len(cmd.Commands()))
+	for _, child := range cmd.Commands() {
+		names = append(names, child.Name())
+	}
+	slices.Sort(names)
+	want := []string{"admin", "identity", "poll", "serve", "tally", "trustee", "version", "vote"}
+	if !slices.Equal(names, want) {
+		t.Fatalf("commands = %v, want %v", names, want)
 	}
 }
 
