@@ -167,6 +167,87 @@ func TestCompareCheckpointsDetectsFork(t *testing.T) {
 	}
 }
 
+func TestCompareBundlesDetectsSparseCheckpointFork(t *testing.T) {
+	t.Parallel()
+
+	value := testManifest(t).Manifest()
+	privateKey := checkpointPrivateKey()
+	genesis := testEvents(t, value.PollID)[0]
+	left, err := Append([]protocol.AuditEvent{genesis}, value.PollID, "ballot_accepted", hashValue("left"), time.Date(2026, 7, 11, 12, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	right, err := Append([]protocol.AuditEvent{genesis}, value.PollID, "ballot_accepted", hashValue("right"), time.Date(2026, 7, 11, 12, 1, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rightTail, err := Append([]protocol.AuditEvent{genesis, right}, value.PollID, "ballot_accepted", hashValue("tail"), time.Date(2026, 7, 11, 12, 2, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := sparseBundle(t, value, []protocol.AuditEvent{genesis, left}, privateKey)
+	second := sparseBundle(t, value, []protocol.AuditEvent{genesis, right, rightTail}, privateKey)
+	if err := CompareBundles(first, second); ErrorCode(err) != "audit_fork_detected" {
+		t.Fatalf("compare error = %v", err)
+	}
+}
+
+func TestCompareBundlesAcceptsEqualAndPrefixHistories(t *testing.T) {
+	t.Parallel()
+
+	value := testManifest(t).Manifest()
+	privateKey := checkpointPrivateKey()
+	events := testEvents(t, value.PollID)
+	prefix := sparseBundle(t, value, events[:1], privateKey)
+	complete := sparseBundle(t, value, events, privateKey)
+	for _, test := range []struct {
+		name   string
+		first  Bundle
+		second Bundle
+	}{
+		{name: "equal", first: complete, second: complete},
+		{name: "prefix", first: prefix, second: complete},
+		{name: "reverse prefix", first: complete, second: prefix},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if err := CompareBundles(test.first, test.second); err != nil {
+				t.Fatalf("compare: %v", err)
+			}
+		})
+	}
+}
+
+func TestCompareBundlesRejectsDifferentCheckpointKeys(t *testing.T) {
+	t.Parallel()
+
+	value := testManifest(t).Manifest()
+	events := testEvents(t, value.PollID)
+	first := sparseBundle(t, value, events, checkpointPrivateKey())
+	otherKey := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x92}, ed25519.SeedSize))
+	second := sparseBundle(t, value, events, otherKey)
+	if err := CompareBundles(first, second); ErrorCode(err) != "incomparable_audit_records" {
+		t.Fatalf("compare error = %v", err)
+	}
+}
+
+func sparseBundle(tb testing.TB, value protocol.Manifest, events []protocol.AuditEvent, privateKey ed25519.PrivateKey) Bundle {
+	tb.Helper()
+	checkpoint, err := CreateCheckpoint(privateKey, events)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return Bundle{
+		SchemaVersion: protocol.SchemaVersion,
+		Protocol:      protocol.ProtocolVersion,
+		CheckpointKey: "ed25519:" + hex.EncodeToString(privateKey.Public().(ed25519.PublicKey)),
+		Manifest:      value,
+		Events:        append([]protocol.AuditEvent(nil), events...),
+		Ballots:       []protocol.BallotEnvelope{},
+		Shares:        []protocol.TrusteeShare{},
+		Checkpoints:   []protocol.Checkpoint{checkpoint},
+	}
+}
+
 func testManifest(tb testing.TB) manifest.Frozen {
 	tb.Helper()
 	encoded, err := os.ReadFile(filepath.Join("..", "..", "testdata", "manifest", "canonical.json"))

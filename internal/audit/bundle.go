@@ -108,6 +108,47 @@ func VerifyBundle(bundle Bundle, checkpointKey ed25519.PublicKey) error {
 	return nil
 }
 
+// CompareBundles detects divergent events in two independently verified
+// histories. A strict prefix is compatible because a later checkpoint may
+// extend an earlier signed history.
+func CompareBundles(first, second Bundle) error {
+	firstKey, err := bundleCheckpointKey(first)
+	if err != nil {
+		return err
+	}
+	secondKey, err := bundleCheckpointKey(second)
+	if err != nil {
+		return err
+	}
+	if first.Manifest.PollID != second.Manifest.PollID || !firstKey.Equal(secondKey) {
+		return &Error{Code: "incomparable_audit_records"}
+	}
+	if err := VerifyBundle(first, firstKey); err != nil {
+		return err
+	}
+	if err := VerifyBundle(second, secondKey); err != nil {
+		return err
+	}
+	sharedEvents := min(len(first.Events), len(second.Events))
+	for index := range sharedEvents {
+		if first.Events[index].EventHash != second.Events[index].EventHash {
+			return &Error{Code: "audit_fork_detected", Err: fmt.Errorf("sequence %d", index+1)}
+		}
+	}
+	bySequence := make(map[uint64]protocol.Checkpoint, len(first.Checkpoints))
+	for _, checkpoint := range first.Checkpoints {
+		bySequence[checkpoint.Sequence] = checkpoint
+	}
+	for _, checkpoint := range second.Checkpoints {
+		if previous, exists := bySequence[checkpoint.Sequence]; exists {
+			if err := CompareCheckpoints(firstKey, previous, checkpoint); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func bundleCheckpointKey(bundle Bundle) (ed25519.PublicKey, error) {
 	payload, ok := strings.CutPrefix(bundle.CheckpointKey, "ed25519:")
 	decoded, err := hex.DecodeString(payload)
