@@ -10,6 +10,8 @@ import (
 	"github.com/cirocosta/vota/internal/protocol"
 )
 
+const MaxBundleBytes = 32 << 20
+
 type Bundle struct {
 	SchemaVersion int                          `json:"schema_version"`
 	Protocol      string                       `json:"protocol"`
@@ -45,7 +47,7 @@ func Export(bundle Bundle, checkpointKey ed25519.PublicKey) ([]byte, error) {
 // ParseBundle strictly decodes and verifies an exported bundle.
 func ParseBundle(encoded []byte, expectedKeys ...ed25519.PublicKey) (Bundle, error) {
 	var bundle Bundle
-	if err := protocol.DecodeStrict(encoded, &bundle); err != nil {
+	if err := protocol.DecodeStrictLimit(encoded, &bundle, MaxBundleBytes); err != nil {
 		return Bundle{}, &Error{Code: "invalid_audit_bundle", Err: err}
 	}
 	checkpointKey, err := bundleCheckpointKey(bundle)

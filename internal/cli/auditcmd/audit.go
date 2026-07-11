@@ -17,7 +17,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const maxRecordBytes = 32 << 20
+const maxRecordBytes = audit.MaxBundleBytes
 
 type Options struct {
 	HTTPClient func(string) (*httpclient.Client, error)

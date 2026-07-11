@@ -42,8 +42,13 @@ func HashCanonical(domain string, value any) (string, error) {
 
 // DecodeStrict rejects duplicate fields, unknown fields, trailing values, and oversized artifacts.
 func DecodeStrict(data []byte, target any) error {
-	if len(data) > MaxArtifactBytes {
-		return validationError("artifact_too_large", "artifact", "artifact exceeds 1 MiB")
+	return DecodeStrictLimit(data, target, MaxArtifactBytes)
+}
+
+// DecodeStrictLimit applies strict decoding with an explicit transport limit.
+func DecodeStrictLimit(data []byte, target any, maxBytes int) error {
+	if maxBytes <= 0 || len(data) > maxBytes {
+		return validationError("artifact_too_large", "artifact", fmt.Sprintf("artifact exceeds %d bytes", maxBytes))
 	}
 	if err := rejectDuplicateFields(data); err != nil {
 		return err

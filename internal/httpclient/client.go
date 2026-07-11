@@ -16,7 +16,7 @@ import (
 	"github.com/cirocosta/vota/internal/protocol"
 )
 
-const maxResponseBytes = 16 << 20
+const maxResponseBytes = 32 << 20
 
 type Client struct {
 	baseURL *url.URL

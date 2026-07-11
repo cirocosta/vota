@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -62,6 +63,19 @@ func TestDecodeStrictRejectsDuplicateAndUnknownFields(t *testing.T) {
 				t.Errorf("error = %v, code = %q, want %q", err, ErrorCode(err), test.code)
 			}
 		})
+	}
+}
+
+func TestDecodeStrictLimitAllowsLargerContainer(t *testing.T) {
+	t.Parallel()
+
+	encoded := []byte(`"` + strings.Repeat("a", MaxArtifactBytes) + `"`)
+	var value string
+	if err := DecodeStrict(encoded, &value); ErrorCode(err) != "artifact_too_large" {
+		t.Fatalf("default error = %v", err)
+	}
+	if err := DecodeStrictLimit(encoded, &value, 2<<20); err != nil {
+		t.Fatalf("larger limit: %v", err)
 	}
 }
 

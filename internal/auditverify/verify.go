@@ -121,6 +121,9 @@ func Verify(encoded []byte) (Report, error) {
 		report.ValidTrusteeIDs = append(report.ValidTrusteeIDs, share.TrusteeID)
 	}
 	if bundle.Tally != nil {
+		if len(bundle.Shares) < bundle.Manifest.Trustees.Quorum || bundle.Aggregate.BallotCount < bundle.Manifest.PrivacyThreshold {
+			return Report{}, &Error{Code: "premature_tally"}
+		}
 		checkpointKey, err := checkpointKey(bundle.CheckpointKey)
 		if err != nil {
 			return Report{}, err
@@ -132,6 +135,8 @@ func Verify(encoded []byte) (Report, error) {
 			return Report{}, err
 		}
 		report.Totals = append([]protocol.ChoiceTotal(nil), bundle.Tally.Totals...)
+	} else if len(bundle.Shares) >= bundle.Manifest.Trustees.Quorum && bundle.Aggregate.BallotCount >= bundle.Manifest.PrivacyThreshold {
+		return Report{}, &Error{Code: "missing_tally"}
 	}
 	if position != len(bundle.Events) {
 		return Report{}, &Error{Code: "unexpected_audit_event"}
