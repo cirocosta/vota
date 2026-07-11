@@ -16,6 +16,7 @@ Documentation:
 
 - [Getting started](docs/getting-started.md)
 - [Security model and limitations](docs/security.md)
+- [Cryptographic design review status](docs/design-review.md)
 - [Collector operations](docs/operations.md)
 - [Experimental protocol](docs/protocol/vota-v1-experimental.md)
 - [Public artifacts](docs/protocol/artifacts.md)

@@ -237,6 +237,9 @@ func run(tb testing.TB, binary, stdin, secret string, arguments ...string) strin
 func runError(binary, stdin, secret string, arguments ...string) (string, error) {
 	command := exec.Command(binary, arguments...)
 	command.Stdin = strings.NewReader(stdin)
+	var stdout, stderr bytes.Buffer
+	command.Stdout = &stdout
+	command.Stderr = &stderr
 	var secretFile *os.File
 	if secret != "" {
 		var err error
@@ -254,8 +257,11 @@ func runError(binary, stdin, secret string, arguments ...string) (string, error)
 		}
 		command.ExtraFiles = []*os.File{secretFile}
 	}
-	output, err := command.CombinedOutput()
-	return string(output), err
+	err := command.Run()
+	if err != nil {
+		return stdout.String() + stderr.String(), err
+	}
+	return stdout.String(), nil
 }
 
 func writeJSON(tb testing.TB, path string, value any) {

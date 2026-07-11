@@ -1,0 +1,9 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "deterministic cryptographic test vectors"
+paths = [
+  '''^testdata/crypto/lrs/vector\.json$''',
+  '''^testdata/crypto/election/vector\.json$''',
+]

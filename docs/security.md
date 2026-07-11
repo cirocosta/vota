@@ -5,6 +5,9 @@ one-hot encrypted ballots, threshold decryption, and a signed public history.
 It has no independent security audit and is not suitable for real elections or
 other consequential decisions.
 
+The current design-review gate is recorded in `design-review.md`. No
+security-reviewed release claim is permitted while that gate remains open.
+
 ## What the implementation verifies
 
 - The administrator signs an immutable manifest containing choices, the full

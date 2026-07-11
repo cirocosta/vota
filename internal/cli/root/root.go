@@ -14,6 +14,7 @@ import (
 )
 
 const artifactSchemaVersion = 1
+const experimentalWarning = "WARNING: Vota is experimental and not suitable for real elections."
 
 // BuildInfo describes the metadata injected into a Vota build.
 type BuildInfo struct {
@@ -38,7 +39,11 @@ func New(info BuildInfo) *cobra.Command {
 		Long:          "Vota is experimental educational software and is not suitable for real elections.",
 		SilenceErrors: true,
 		SilenceUsage:  true,
+		PersistentPreRun: func(command *cobra.Command, _ []string) {
+			_, _ = fmt.Fprintln(command.ErrOrStderr(), experimentalWarning)
+		},
 	}
+	cmd.SetHelpTemplate(cmd.HelpTemplate() + "\n" + experimentalWarning + "\n")
 	cmd.AddCommand(newVersionCommand(info))
 	cmd.AddCommand(admin.Commands(admin.Options{})...)
 	cmd.AddCommand(voter.Commands(voter.Options{})...)

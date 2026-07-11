@@ -71,6 +71,8 @@ Use `vota <group> <command> --help` for required flags. Passphrases and
 administrator tokens are read without echo from a terminal by default.
 Automation passes them through an already-open file descriptor. Automated
 choice input uses `vote cast --choice-stdin`; no choice value flag exists.
+Every command writes the educational-use warning to stderr so canonical JSON
+stdout remains machine-readable.
 
 ## Artifact lifecycle
 

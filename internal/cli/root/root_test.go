@@ -54,6 +54,36 @@ func TestRootWiresRoleAndServerCommands(t *testing.T) {
 	}
 }
 
+func TestSubcommandHelpAndExecutionWarn(t *testing.T) {
+	t.Parallel()
+
+	help := New(BuildInfo{})
+	var helpOutput bytes.Buffer
+	help.SetOut(&helpOutput)
+	help.SetArgs([]string{"admin", "--help"})
+	if err := help.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(helpOutput.String(), experimentalWarning) {
+		t.Fatalf("subcommand help omits warning:\n%s", helpOutput.String())
+	}
+
+	command := New(BuildInfo{})
+	var stdout, stderr bytes.Buffer
+	command.SetOut(&stdout)
+	command.SetErr(&stderr)
+	command.SetArgs([]string{"version", "--json"})
+	if err := command.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(stdout.String(), experimentalWarning) {
+		t.Fatalf("JSON stdout contains warning: %s", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), experimentalWarning) {
+		t.Fatalf("execution stderr omits warning: %s", stderr.String())
+	}
+}
+
 func TestRootHelpWarnsAboutExperimentalUse(t *testing.T) {
 	t.Parallel()
 
