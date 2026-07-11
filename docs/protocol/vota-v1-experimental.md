@@ -27,14 +27,24 @@ The complete domain registry is the ordered result of
 
 ## Poll manifest
 
+Before enrollment, the draft poll ID is SHA-256 over
+`vota:v1:poll-draft-id`, a zero byte, and canonical draft identity JSON. The
+identity contains the schema and protocol versions, eligibility scheme,
+question, choices, trustee IDs, signing keys and ceremony commitments, quorum,
+election public key, privacy threshold, normalized UTC window, authority key,
+and experimental warning. It excludes enrollments. Choices and trustees are
+sorted by ID before hashing.
+
 The poll ID is SHA-256 over `vota:v1:poll-id`, a zero byte, and the RFC 8785
 canonical manifest with `poll_id` and `authority_signature` set to empty strings.
 The administrator signs the poll ID and canonical unsigned manifest under
-`vota:v1:manifest-signature` using Ed25519.
+`vota:v1:manifest-signature` using Ed25519. The signed bytes are the domain, a
+zero byte, the length-prefixed 32-byte poll ID, and the length-prefixed
+canonical manifest with only `authority_signature` empty.
 
 Eligible Ristretto255 keys are validated, deduplicated, and sorted by canonical
-encoded bytes. Every voter uses this exact order. The ring is immutable after
-the manifest is signed.
+encoded bytes. Choices and trustees are sorted by ID. Every voter uses these
+exact orders. The manifest is immutable after it is signed.
 
 ## Enrollment proof
 
@@ -50,6 +60,11 @@ proof = (R, s)
 ```
 
 Verification checks `sG = R + cP`.
+
+The hash-to-scalar transcript contains, in order, the enrollment domain, a zero
+byte, and length-prefixed raw draft ID, eligibility public key, and `R`. The
+proof artifact encodes canonical `R || s` bytes. Changing the draft, key, proof,
+trustee ceremony, or poll window invalidates enrollment.
 
 ## Linkable ring proof
 

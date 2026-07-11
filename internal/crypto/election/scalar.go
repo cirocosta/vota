@@ -81,7 +81,8 @@ func scalarFromIndex(index uint16) *ristretto255.Scalar {
 
 func hashScalar(domain string, fields ...[]byte) *ristretto255.Scalar {
 	hash := sha512.New()
-	writeField(hash, []byte(domain))
+	_, _ = hash.Write([]byte(domain))
+	_, _ = hash.Write([]byte{0})
 	for _, field := range fields {
 		writeField(hash, field)
 	}

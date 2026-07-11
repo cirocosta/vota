@@ -292,7 +292,8 @@ func validateRing(ring []PublicKey) ([]*ristretto255.Element, error) {
 
 func hashRing(pollID [PollIDSize]byte, ring []PublicKey) [64]byte {
 	hash := sha512.New()
-	writeTranscriptField(hash, []byte(protocol.DomainRingHash))
+	_, _ = hash.Write([]byte(protocol.DomainRingHash))
+	_, _ = hash.Write([]byte{0})
 	writeTranscriptField(hash, pollID[:])
 	var count [8]byte
 	binary.BigEndian.PutUint64(count[:], uint64(len(ring)))
@@ -345,7 +346,8 @@ func hashChallenge(
 
 func transcriptHash(domain string, fields ...[]byte) [64]byte {
 	hash := sha512.New()
-	writeTranscriptField(hash, []byte(domain))
+	_, _ = hash.Write([]byte(domain))
+	_, _ = hash.Write([]byte{0})
 	for _, field := range fields {
 		writeTranscriptField(hash, field)
 	}
