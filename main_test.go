@@ -2,9 +2,29 @@ package main
 
 import (
 	"bytes"
+	"encoding/hex"
 	"strings"
 	"testing"
 )
+
+func TestHSMatchesMoneroHashToScalar(t *testing.T) {
+	t.Parallel()
+
+	var input [32]byte
+	for i := range input {
+		input[i] = byte(i)
+	}
+
+	want, err := hex.DecodeString("b039bf9f4adb213b27713da72243483edea5e526567e92b0321816a4e895bd0d")
+	if err != nil {
+		t.Fatalf("decode expected scalar: %v", err)
+	}
+
+	got := hs(input)
+	if !bytes.Equal(got[:], want) {
+		t.Fatalf("hs = %s, want %s", hex.EncodeToString(got[:]), hex.EncodeToString(want))
+	}
+}
 
 func TestEncryptUsesUniqueNonce(t *testing.T) {
 	t.Parallel()
