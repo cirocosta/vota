@@ -46,6 +46,9 @@ Eligible Ristretto255 keys are validated, deduplicated, and sorted by canonical
 encoded bytes. Choices and trustees are sorted by ID. Every voter uses these
 exact orders. The manifest is immutable after it is signed.
 
+The manifest hash is SHA-256 over `vota:v1:manifest-hash`, a zero byte, and the
+complete signed canonical manifest. Ballots carry this hash verbatim.
+
 ## Enrollment proof
 
 An enrollment proves possession of scalar `x` for public key `P = xG` with a
@@ -154,8 +157,9 @@ Its final share is `y_i = sum_d f_d(i)`. Its public share is derived from the
 same commitment equation, without reading any private share.
 
 Accepted ciphertexts are added by choice position. The aggregate artifact binds
-the ordered accepted ballot hashes and summed ciphertexts under
-`vota:v1:aggregate-hash`.
+the ordered accepted ballot hashes, ballot count, poll ID, and summed
+ciphertexts under `vota:v1:aggregate-hash`. Ballot hashes are ordered by their
+accepted audit sequence and included in the public aggregate artifact.
 
 For aggregate component `(A, B)`, trustee `i` publishes `D_i = y_i A` and a
 Chaum-Pedersen proof under `vota:v1:decryption-share-proof` that the same secret

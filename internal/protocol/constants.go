@@ -18,6 +18,7 @@ const (
 	DomainPollID               = "vota:v1:poll-id"
 	DomainPollDraftID          = "vota:v1:poll-draft-id"
 	DomainManifestSignature    = "vota:v1:manifest-signature"
+	DomainManifestHash         = "vota:v1:manifest-hash"
 	DomainEnrollmentProof      = "vota:v1:enrollment-proof"
 	DomainRingHash             = "vota:v1:ring-hash"
 	DomainRingChallenge        = "vota:v1:ring-challenge"
@@ -42,6 +43,7 @@ func DomainSeparators() []string {
 		DomainPollID,
 		DomainPollDraftID,
 		DomainManifestSignature,
+		DomainManifestHash,
 		DomainEnrollmentProof,
 		DomainRingHash,
 		DomainRingChallenge,

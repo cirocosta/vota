@@ -93,6 +93,7 @@ type EncryptedAggregate struct {
 	Protocol      string   `json:"protocol"`
 	PollID        string   `json:"poll_id"`
 	BallotCount   int      `json:"ballot_count"`
+	BallotHashes  []string `json:"ballot_hashes"`
 	Ciphertexts   []string `json:"ciphertexts"`
 	AggregateHash string   `json:"aggregate_hash"`
 }

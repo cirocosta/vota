@@ -14,6 +14,67 @@ const (
 	shareHeaderSize     = 1 + 2 + 32 + 1
 )
 
+func (proof ValidityProof) MarshalBinary() ([]byte, error) {
+	choiceCount := len(proof.Bits)
+	if choiceCount < MinChoices || choiceCount > MaxChoices {
+		return nil, &Error{Code: "invalid_validity_proof_size"}
+	}
+	encoded := make([]byte, 2+choiceCount*bitProofSize+equalityProofSize)
+	encoded[0] = 1
+	encoded[1] = byte(choiceCount)
+	offset := 2
+	for _, bitProof := range proof.Bits {
+		for branch := range 2 {
+			if _, err := decodeScalar(bitProof.Challenges[branch]); err != nil {
+				return nil, &Error{Code: "invalid_choice_proof", Err: err}
+			}
+			copy(encoded[offset:offset+ScalarSize], bitProof.Challenges[branch][:])
+			offset += ScalarSize
+		}
+		for branch := range 2 {
+			if _, err := decodeScalar(bitProof.Responses[branch]); err != nil {
+				return nil, &Error{Code: "invalid_choice_proof", Err: err}
+			}
+			copy(encoded[offset:offset+ScalarSize], bitProof.Responses[branch][:])
+			offset += ScalarSize
+		}
+	}
+	for _, scalar := range []Scalar{proof.Sum.Challenge, proof.Sum.Response} {
+		if _, err := decodeScalar(scalar); err != nil {
+			return nil, &Error{Code: "invalid_choice_sum_proof", Err: err}
+		}
+		copy(encoded[offset:offset+ScalarSize], scalar[:])
+		offset += ScalarSize
+	}
+	return encoded, nil
+}
+
+func ParseValidityProof(encoded []byte, choiceCount int) (ValidityProof, error) {
+	expected := 2 + choiceCount*bitProofSize + equalityProofSize
+	if choiceCount < MinChoices || choiceCount > MaxChoices || len(encoded) != expected || encoded[0] != 1 || int(encoded[1]) != choiceCount {
+		return ValidityProof{}, &Error{Code: "invalid_validity_proof_size"}
+	}
+	proof := ValidityProof{Bits: make([]BitProof, choiceCount)}
+	offset := 2
+	for index := range choiceCount {
+		for branch := range 2 {
+			copy(proof.Bits[index].Challenges[branch][:], encoded[offset:offset+ScalarSize])
+			offset += ScalarSize
+		}
+		for branch := range 2 {
+			copy(proof.Bits[index].Responses[branch][:], encoded[offset:offset+ScalarSize])
+			offset += ScalarSize
+		}
+	}
+	copy(proof.Sum.Challenge[:], encoded[offset:offset+ScalarSize])
+	offset += ScalarSize
+	copy(proof.Sum.Response[:], encoded[offset:offset+ScalarSize])
+	if _, err := proof.MarshalBinary(); err != nil {
+		return ValidityProof{}, err
+	}
+	return proof, nil
+}
+
 func (ciphertext Ciphertext) MarshalBinary() ([]byte, error) {
 	if _, err := decodePoint(ciphertext.A); err != nil {
 		return nil, &Error{Code: "invalid_ciphertext", Err: err}
