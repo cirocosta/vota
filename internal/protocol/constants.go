@@ -27,6 +27,8 @@ const (
 	DomainChoiceProof          = "vota:v1:choice-proof"
 	DomainChoiceSumProof       = "vota:v1:choice-sum-proof"
 	DomainCeremonyCommitment   = "vota:v1:ceremony-commitment"
+	DomainCeremonyContribution = "vota:v1:ceremony-contribution"
+	DomainCeremonyShare        = "vota:v1:ceremony-share"
 	DomainAggregateHash        = "vota:v1:aggregate-hash"
 	DomainDecryptionShare      = "vota:v1:decryption-share"
 	DomainDecryptionShareProof = "vota:v1:decryption-share-proof"
@@ -52,6 +54,8 @@ func DomainSeparators() []string {
 		DomainChoiceProof,
 		DomainChoiceSumProof,
 		DomainCeremonyCommitment,
+		DomainCeremonyContribution,
+		DomainCeremonyShare,
 		DomainAggregateHash,
 		DomainDecryptionShare,
 		DomainDecryptionShareProof,

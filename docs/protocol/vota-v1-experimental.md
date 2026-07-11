@@ -146,6 +146,16 @@ are outside the public artifact. Each recipient verifies its share against the
 commitments. Aggregate public key `Y` is the sum of constant coefficient
 commitments. No combined private key is constructed.
 
+The CLI request lists sorted trustee IDs, Ed25519 signing keys, and X25519
+transport keys. Each signed contribution contains one public commitment and
+one encrypted dealer share per recipient. The Ed25519 signature covers the
+canonical contribution without its signature field under
+`vota:v1:ceremony-contribution`. Each share uses a fresh X25519 ephemeral key.
+HKDF-SHA-256 derives its XChaCha20-Poly1305 key with
+`vota:v1:ceremony-share:<dealer-id>:<recipient-id>` as context and associated
+data. Finalization verifies every signature and Feldman share, then stores only
+the recipient's summed share in its encrypted trustee keystore.
+
 Trustee indices are the integers 1 through `n`. Dealer `d` publishes
 `C_(d,k) = a_(d,k)G` and privately sends `f_d(i)` to trustee `i`. Recipient `i`
 checks:
