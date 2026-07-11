@@ -104,7 +104,6 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/davecgh/go-spew/spew"
 	"golang.org/x/crypto/chacha20poly1305"
 	"golang.org/x/crypto/curve25519"
 	"golang.org/x/crypto/sha3"
@@ -193,7 +192,7 @@ func (p *keypair) dh(C [curve25519.PointSize]byte) ([curve25519.PointSize]byte, 
 }
 
 func (p *keypair) String() string {
-	return fmt.Sprintf("\tpri:\t%x\n\tpub:\t%x\n", p.x, p.P)
+	return fmt.Sprintf("\tpub:\t%x\n", p.P)
 }
 
 func encrypt(x [curve25519.PointSize]byte, data []byte) ([]byte, error) {
@@ -279,9 +278,9 @@ func main() {
 
 	f := hs(D)
 
-	spew.Dump(bob_view)
-	spew.Dump(bob_spend)
-	spew.Dump(f)
+	fmt.Printf("bob view public:\t%x\n", bob_view.P)
+	fmt.Printf("bob spend public:\t%x\n", bob_spend.P)
+	fmt.Printf("shared scalar:\t\t%x\n", f)
 
 	// P = Hs(rA)G + B
 	// - P  	public stealth addr
