@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/cirocosta/vota/internal/protocol"
 )
 
 var testKDF = KDFParams{
@@ -152,6 +154,46 @@ func TestTamperingReturnsUnlockFailure(t *testing.T) {
 	_, _, err = Open(tampered, RoleVoter, []byte("passphrase"))
 	if ErrorCode(err) != "key_unlock_failed" {
 		t.Fatalf("tamper error = %v, want key_unlock_failed", err)
+	}
+}
+
+func TestOpenRejectsUppercaseHex(t *testing.T) {
+	t.Parallel()
+
+	encoded, err := Seal(RoleVoter, "voter-key", []byte("secret"), []byte("passphrase"), testOptions())
+	if err != nil {
+		t.Fatalf("seal: %v", err)
+	}
+	var envelope Envelope
+	if err := json.Unmarshal(encoded, &envelope); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		change func(*Envelope)
+	}{
+		{"salt", func(value *Envelope) { value.Salt = strings.ToUpper(value.Salt) }},
+		{"nonce", func(value *Envelope) { value.Nonce = strings.ToUpper(value.Nonce) }},
+		{"ciphertext", func(value *Envelope) { value.Ciphertext = strings.ToUpper(value.Ciphertext) }},
+		{"ciphertext checksum", func(value *Envelope) {
+			prefix, payload, _ := strings.Cut(value.CiphertextChecksum, ":")
+			value.CiphertextChecksum = prefix + ":" + strings.ToUpper(payload)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mutated := envelope
+			test.change(&mutated)
+			encoded, err := protocol.MarshalCanonical(mutated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = Open(encoded, RoleVoter, []byte("passphrase"))
+			if ErrorCode(err) != "invalid_keystore" {
+				t.Fatalf("open error = %v, want invalid_keystore", err)
+			}
+		})
 	}
 }
 

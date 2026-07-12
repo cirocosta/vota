@@ -189,7 +189,14 @@ func Open(encoded []byte, expectedRole Role, passphrase []byte) ([]byte, Envelop
 		return nil, Envelope{}, &Error{Code: "invalid_keystore"}
 	}
 	checksum := sha256.Sum256(ciphertext)
-	if envelope.CiphertextChecksum != "sha256:"+hex.EncodeToString(checksum[:]) {
+	checksumPayload, ok := strings.CutPrefix(envelope.CiphertextChecksum, "sha256:")
+	if !ok || len(checksumPayload) != sha256.Size*2 || checksumPayload != strings.ToLower(checksumPayload) {
+		return nil, Envelope{}, &Error{Code: "invalid_keystore"}
+	}
+	if _, err := hex.DecodeString(checksumPayload); err != nil {
+		return nil, Envelope{}, &Error{Code: "invalid_keystore", Err: fmt.Errorf("ciphertext_checksum: %w", err)}
+	}
+	if checksumPayload != hex.EncodeToString(checksum[:]) {
 		return nil, Envelope{}, &Error{Code: "key_unlock_failed"}
 	}
 	aad, err := associatedData(envelope)
@@ -333,6 +340,9 @@ func decodeHex(field, value string, expectedBytes int) ([]byte, error) {
 	decoded, err := hex.DecodeString(value)
 	if err != nil {
 		return nil, &Error{Code: "invalid_keystore", Err: fmt.Errorf("%s: %w", field, err)}
+	}
+	if value != strings.ToLower(value) {
+		return nil, &Error{Code: "invalid_keystore", Err: fmt.Errorf("%s: hex must be lowercase", field)}
 	}
 	if expectedBytes >= 0 && len(decoded) != expectedBytes {
 		return nil, &Error{Code: "invalid_keystore", Err: fmt.Errorf("%s: expected %d bytes", field, expectedBytes)}
