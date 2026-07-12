@@ -455,6 +455,9 @@ func decodeValue(value, prefix string, size int) ([]byte, error) {
 	if !ok {
 		return nil, fmt.Errorf("expected %s value", prefix)
 	}
+	if payload != strings.ToLower(payload) {
+		return nil, fmt.Errorf("invalid %s value", prefix)
+	}
 	decoded, err := hex.DecodeString(payload)
 	if err != nil || len(decoded) != size {
 		return nil, fmt.Errorf("invalid %s value", prefix)
