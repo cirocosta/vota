@@ -41,6 +41,8 @@ an operator the team trusts under this model.
 - Concurrent claims for one SSH key commit at most one issuance.
 - Credentials bind their poll, issuer key, random serial, and protocol domain.
 - Concurrent redemption of one credential commits at most one ballot.
+- An exact ballot retry returns the stored signed receipt without appending a
+  second ballot. A retry with another choice is rejected.
 - Open polls expose neither individual ballots nor partial totals.
 - Signed hash-chain checkpoints reveal modification of published ballot logs.
 - Offline replay recomputes the final tally and validates receipt inclusion.

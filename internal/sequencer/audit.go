@@ -59,7 +59,7 @@ func VerifyAudit(bundle AuditBundle) error {
 	if err := VerifyPoll(key, bundle.Poll); err != nil {
 		return err
 	}
-	if err := VerifyTally(key, bundle.Tally); err != nil {
+	if err := VerifyTallyForPoll(bundle.Poll, bundle.Tally); err != nil {
 		return err
 	}
 	if len(bundle.Events) == 0 || len(bundle.Events) != len(bundle.Checkpoints) {
@@ -100,7 +100,7 @@ func VerifyAudit(bundle AuditBundle) error {
 				return &Error{Code: "invalid_choice"}
 			}
 			var receipt Receipt
-			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash {
+			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash || receipt.ChoiceID != record.ChoiceID {
 				return &Error{Code: "invalid_receipt", Err: err}
 			}
 			if err := VerifyReceipt(key, receipt); err != nil {
@@ -168,10 +168,61 @@ func VerifyReceipt(publicKey ed25519.PublicKey, receipt Receipt) error {
 	return verifyValue(publicKey, "vota:receipt:v1", receipt, signature)
 }
 
+func VerifyReceiptForBallot(poll Poll, request BallotRequest, receipt Receipt) error {
+	publicKey, err := decodeBase64(poll.CheckpointPublicKey, ed25519.PublicKeySize)
+	if err != nil {
+		return &Error{Code: "invalid_checkpoint_public_key", Err: err}
+	}
+	_, expectedHash, err := verifyWireCredential(poll, request.Credential)
+	if err != nil {
+		return err
+	}
+	if receipt.SchemaVersion != SchemaVersion || receipt.Protocol != Protocol || receipt.PollID != poll.PollID || receipt.CredentialHash != expectedHash || receipt.ChoiceID != request.ChoiceID {
+		return &Error{Code: "receipt_binding_mismatch"}
+	}
+	return VerifyReceipt(ed25519.PublicKey(publicKey), receipt)
+}
+
 func VerifyTally(publicKey ed25519.PublicKey, tally Tally) error {
 	signature := tally.Signature
 	tally.Signature = ""
 	return verifyValue(publicKey, "vota:tally:v1", tally, signature)
+}
+
+func VerifyTallyForPoll(poll Poll, tally Tally) error {
+	publicKey, err := decodeBase64(poll.CheckpointPublicKey, ed25519.PublicKeySize)
+	if err != nil {
+		return &Error{Code: "invalid_checkpoint_public_key", Err: err}
+	}
+	if tally.SchemaVersion != SchemaVersion || tally.Protocol != Protocol || tally.PollID != poll.PollID || len(tally.Totals) != len(poll.Choices) || tally.BallotCount < 0 {
+		return &Error{Code: "tally_mismatch"}
+	}
+	choices := make(map[string]struct{}, len(poll.Choices))
+	for _, choice := range poll.Choices {
+		choices[choice.ID] = struct{}{}
+	}
+	seen := make(map[string]struct{}, len(tally.Totals))
+	totalVotes := 0
+	for _, total := range tally.Totals {
+		if total.Total < 0 {
+			return &Error{Code: "tally_mismatch"}
+		}
+		if _, exists := choices[total.ChoiceID]; !exists {
+			return &Error{Code: "tally_mismatch"}
+		}
+		if _, duplicate := seen[total.ChoiceID]; duplicate {
+			return &Error{Code: "tally_mismatch"}
+		}
+		if total.Total > tally.BallotCount-totalVotes {
+			return &Error{Code: "tally_mismatch"}
+		}
+		seen[total.ChoiceID] = struct{}{}
+		totalVotes += total.Total
+	}
+	if totalVotes != tally.BallotCount {
+		return &Error{Code: "tally_mismatch"}
+	}
+	return VerifyTally(ed25519.PublicKey(publicKey), tally)
 }
 
 func choiceExists(choices []Choice, choiceID string) bool {
@@ -200,6 +251,9 @@ func (service *Service) Ready(ctx context.Context) error {
 		var pollArtifact Poll
 		if err := protocol.DecodeStrict(poll.Artifact, &pollArtifact); err != nil {
 			return &Error{Code: "invalid_stored_poll", Err: err}
+		}
+		if err := service.requireIssuer(poll); err != nil {
+			return err
 		}
 		if err := VerifyPollArtifact(pollArtifact); err != nil {
 			return err
@@ -250,7 +304,7 @@ func (service *Service) Ready(ctx context.Context) error {
 				return &Error{Code: "invalid_credential", Err: err}
 			}
 			seenCredentials[record.CredentialHash] = struct{}{}
-			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash {
+			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash || receipt.ChoiceID != record.ChoiceID {
 				return &Error{Code: "invalid_stored_receipt", Err: err}
 			}
 			if err := VerifyReceipt(service.checkpointPublic, receipt); err != nil {

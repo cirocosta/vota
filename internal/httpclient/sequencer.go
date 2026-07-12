@@ -28,10 +28,10 @@ func (client *Client) ClaimCredential(ctx context.Context, pollID string, reques
 	return result, status == http.StatusCreated, err
 }
 
-func (client *Client) VoteWithCredential(ctx context.Context, pollID string, request sequencer.BallotRequest) (sequencer.Receipt, error) {
+func (client *Client) VoteWithCredential(ctx context.Context, pollID string, request sequencer.BallotRequest) (sequencer.Receipt, bool, error) {
 	var result sequencer.Receipt
-	_, err := client.doJSON(ctx, http.MethodPost, "/v2/polls/"+url.PathEscape(pollID)+"/ballots", request, "", &result)
-	return result, err
+	status, err := client.doJSON(ctx, http.MethodPost, "/v2/polls/"+url.PathEscape(pollID)+"/ballots", request, "", &result)
+	return result, status == http.StatusCreated, err
 }
 
 func (client *Client) CloseSequencerPoll(ctx context.Context, pollID string, request sequencer.ClosePollRequest) (sequencer.Tally, error) {

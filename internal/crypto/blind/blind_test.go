@@ -11,6 +11,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -144,6 +145,34 @@ func TestKeyPersistenceAndPermissions(t *testing.T) {
 	}
 	if _, _, err := LoadOrCreatePrivateKey(path); ErrorCode(err) != "unsafe_issuer_key_permissions" {
 		t.Fatalf("permission error = %v", err)
+	}
+}
+
+func TestConcurrentKeyCreationKeepsOneKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "keys", "issuer.pem")
+	keys := make([]*rsa.PrivateKey, 2)
+	created := make([]bool, 2)
+	errorsFound := make([]error, 2)
+	start := make(chan struct{})
+	var wait sync.WaitGroup
+	for index := range keys {
+		wait.Add(1)
+		go func(index int) {
+			defer wait.Done()
+			<-start
+			keys[index], created[index], errorsFound[index] = LoadOrCreatePrivateKey(path)
+		}(index)
+	}
+	close(start)
+	wait.Wait()
+	if errorsFound[0] != nil || errorsFound[1] != nil {
+		t.Fatalf("errors = %v", errorsFound)
+	}
+	if created[0] == created[1] {
+		t.Fatalf("created = %v", created)
+	}
+	if keys[0].N.Cmp(keys[1].N) != 0 {
+		t.Fatal("callers loaded different issuer keys")
 	}
 }
 

@@ -63,7 +63,10 @@ func LoadOrCreatePrivateKey(path string) (*rsa.PrivateKey, bool, error) {
 	if err := temporary.Close(); err != nil {
 		return nil, false, &Error{Code: "issuer_key_write_failed", Err: err}
 	}
-	if err := os.Rename(temporaryPath, path); err != nil {
+	if err := os.Link(temporaryPath, path); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return LoadOrCreatePrivateKey(path)
+		}
 		return nil, false, &Error{Code: "issuer_key_write_failed", Err: err}
 	}
 	return key, true, nil

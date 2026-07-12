@@ -196,7 +196,7 @@ func (api *SequencerAPI) vote(response http.ResponseWriter, request *http.Reques
 	if !api.decode(response, request, &input) {
 		return
 	}
-	receipt, err := api.service.Vote(request.Context(), request.PathValue("poll_id"), input)
+	receipt, created, err := api.service.Vote(request.Context(), request.PathValue("poll_id"), input)
 	if err != nil {
 		if sequencer.ErrorCode(err) == "credential_already_spent" {
 			api.metrics.DuplicateRedemptions.Add(1)
@@ -204,8 +204,12 @@ func (api *SequencerAPI) vote(response http.ResponseWriter, request *http.Reques
 		api.serviceError(response, request, err)
 		return
 	}
-	api.metrics.VotesAccepted.Add(1)
-	writeJSON(response, http.StatusCreated, receipt)
+	status := http.StatusOK
+	if created {
+		api.metrics.VotesAccepted.Add(1)
+		status = http.StatusCreated
+	}
+	writeJSON(response, status, receipt)
 }
 
 func (api *SequencerAPI) closePollV2(response http.ResponseWriter, request *http.Request) {

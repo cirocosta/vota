@@ -49,6 +49,7 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 	}
 
 	receipts := make([]Receipt, len(keys))
+	ballots := make([]BallotRequest, len(keys))
 	for index, privateKey := range keys {
 		memberKey := canonicalKey(privateKey)
 		issuer, err := blind.ParsePublicKey(poll.IssuerPublicKey)
@@ -103,15 +104,17 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 			Serial:      base64.RawURLEncoding.EncodeToString(credential.Serial),
 			Signature:   base64.RawURLEncoding.EncodeToString(credential.Signature),
 		}, ChoiceID: poll.Choices[index].ID}
+		ballots[index] = ballot
 		if index == 0 {
 			service.now = func() time.Time { return now.Add(2 * time.Hour) }
-			if _, err := service.Vote(ctx, poll.PollID, ballot); ErrorCode(err) != "poll_not_open" {
+			if _, _, err := service.Vote(ctx, poll.PollID, ballot); ErrorCode(err) != "poll_not_open" {
 				t.Fatalf("expired vote error = %v", err)
 			}
 			service.now = func() time.Time { return now }
 		}
 		if index == 0 {
 			var concurrentReceipts [2]Receipt
+			var concurrentCreated [2]bool
 			var concurrentErrors [2]error
 			start := make(chan struct{})
 			var wait sync.WaitGroup
@@ -120,32 +123,48 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 				go func(attempt int) {
 					defer wait.Done()
 					<-start
-					concurrentReceipts[attempt], concurrentErrors[attempt] = service.Vote(ctx, poll.PollID, ballot)
+					concurrentReceipts[attempt], concurrentCreated[attempt], concurrentErrors[attempt] = service.Vote(ctx, poll.PollID, ballot)
 				}(attempt)
 			}
 			close(start)
 			wait.Wait()
-			codes := []string{ErrorCode(concurrentErrors[0]), ErrorCode(concurrentErrors[1])}
-			slices.Sort(codes)
-			if !slices.Equal(codes, []string{"credential_already_spent", "internal_error"}) {
-				t.Fatalf("concurrent vote errors = %v (%v)", codes, concurrentErrors)
+			if concurrentErrors[0] != nil || concurrentErrors[1] != nil {
+				t.Fatalf("concurrent vote errors = %v", concurrentErrors)
 			}
-			if concurrentErrors[0] == nil {
-				receipts[index] = concurrentReceipts[0]
-			} else {
-				receipts[index] = concurrentReceipts[1]
+			if concurrentCreated[0] == concurrentCreated[1] {
+				t.Fatalf("concurrent created = %v", concurrentCreated)
 			}
+			if concurrentReceipts[0] != concurrentReceipts[1] {
+				t.Fatalf("concurrent receipts differ")
+			}
+			receipts[index] = concurrentReceipts[0]
 		} else {
-			receipts[index], err = service.Vote(ctx, poll.PollID, ballot)
-			if err != nil {
-				t.Fatalf("vote %d: %v", index, err)
+			var created bool
+			receipts[index], created, err = service.Vote(ctx, poll.PollID, ballot)
+			if err != nil || !created {
+				t.Fatalf("vote %d: created=%v err=%v", index, created, err)
 			}
 		}
-		if err := VerifyReceipt(service.checkpointPublic, receipts[index]); err != nil {
+		if err := VerifyReceiptForBallot(poll, ballot, receipts[index]); err != nil {
 			t.Fatalf("receipt %d: %v", index, err)
 		}
-		if _, err := service.Vote(ctx, poll.PollID, ballot); ErrorCode(err) != "credential_already_spent" {
-			t.Fatalf("duplicate vote error = %v", err)
+		if index == 0 {
+			wrongChoice := receipts[index]
+			wrongChoice.ChoiceID = poll.Choices[1].ID
+			wrongChoice.Signature = ""
+			wrongChoice.Signature, _ = service.signValue("vota:receipt:v1", wrongChoice)
+			if err := VerifyReceiptForBallot(poll, ballot, wrongChoice); ErrorCode(err) != "receipt_binding_mismatch" {
+				t.Fatalf("wrong-choice receipt error = %v", err)
+			}
+		}
+		voteRetried, created, err := service.Vote(ctx, poll.PollID, ballot)
+		if err != nil || created || voteRetried != receipts[index] {
+			t.Fatalf("vote retry: created=%v receipt=%+v err=%v", created, voteRetried, err)
+		}
+		changedBallot := ballot
+		changedBallot.ChoiceID = poll.Choices[(index+1)%len(poll.Choices)].ID
+		if _, _, err := service.Vote(ctx, poll.PollID, changedBallot); ErrorCode(err) != "credential_already_spent" {
+			t.Fatalf("changed duplicate vote error = %v", err)
 		}
 	}
 
@@ -163,8 +182,23 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 			t.Fatalf("total = %+v", total)
 		}
 	}
+	if err := VerifyTallyForPoll(poll, tally); err != nil {
+		t.Fatalf("verify tally: %v", err)
+	}
+	invalidTally := tally
+	invalidTally.Totals = append([]ChoiceTotal(nil), tally.Totals...)
+	invalidTally.Totals[1] = invalidTally.Totals[0]
+	invalidTally.Signature = ""
+	invalidTally.Signature, _ = service.signValue("vota:tally:v1", invalidTally)
+	if err := VerifyTallyForPoll(poll, invalidTally); ErrorCode(err) != "tally_mismatch" {
+		t.Fatalf("duplicate tally choice error = %v", err)
+	}
 	if _, closed, err := service.ClosePoll(ctx, poll.PollID, closeRequest); err != nil || closed {
 		t.Fatalf("idempotent close: closed=%v err=%v", closed, err)
+	}
+	retriedAfterClose, created, err := service.Vote(ctx, poll.PollID, ballots[0])
+	if err != nil || created || retriedAfterClose != receipts[0] {
+		t.Fatalf("closed retry: created=%v receipt=%+v err=%v", created, retriedAfterClose, err)
 	}
 	bundle, err := service.Audit(ctx, poll.PollID)
 	if err != nil {
@@ -210,6 +244,62 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 	duplicated.Checkpoints = append(duplicated.Checkpoints, bundle.Checkpoints[1:]...)
 	if err := VerifyAudit(duplicated); err == nil {
 		t.Fatal("duplicated audit event accepted")
+	}
+}
+
+func TestIssuerReplacementCannotClaimExistingPoll(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
+	service, keys := testService(t, now)
+	adminKey := canonicalKey(keys[0])
+	request := CreatePollRequest{
+		RequestID: base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{9}, 16)),
+		Question:  "Lunch?", Choices: []string{"Pizza", "Ramen"},
+		ClosesAt: now.Add(time.Hour).Format(time.RFC3339), Members: canonicalKeys(keys),
+		AdminPublicKey: adminKey,
+	}
+	message, _ := CreatePollMessage(request)
+	request.SSHSIG = signWithSocket(t, keys[0], adminKey, AdminNamespace, message)
+	poll, _, err := service.CreatePoll(ctx, request)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	replacementIssuer, err := rsa.GenerateKey(rand.Reader, blind.MinRSAKeyBits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := New(Config{
+		Store: service.store, IssuerPrivateKey: replacementIssuer,
+		CheckpointPrivateKey: service.checkpointPrivate,
+		AdminPublicKeys:      []string{adminKey}, Now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := replacement.Ready(ctx); ErrorCode(err) != "issuer_key_mismatch" {
+		t.Fatalf("readiness error = %v", err)
+	}
+
+	issuer, _ := blind.ParsePublicKey(poll.IssuerPublicKey)
+	prepared, err := blind.Prepare(issuer, poll.PollID, poll.IssuerKeyID, bytes.Repeat([]byte{4}, blind.SerialSize), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestID := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{5}, 16))
+	claimMessage, _ := ClaimMessage(poll.PollID, requestID, prepared.BlindedMessage)
+	memberKey := canonicalKey(keys[1])
+	claim := ClaimRequest{
+		SSHPublicKey: memberKey, IssuanceRequestID: requestID,
+		BlindedMessage: base64.RawURLEncoding.EncodeToString(prepared.BlindedMessage),
+		SSHSIG:         signWithSocket(t, keys[1], memberKey, CreditClaimNamespace, claimMessage),
+	}
+	if _, _, err := replacement.Claim(ctx, poll.PollID, claim); ErrorCode(err) != "issuer_key_mismatch" {
+		t.Fatalf("claim error = %v", err)
+	}
+	claimed, _, err := service.store.ProjectionCounts(ctx, poll.PollID)
+	if err != nil || claimed != 0 {
+		t.Fatalf("claimed=%d err=%v", claimed, err)
 	}
 }
 

@@ -183,6 +183,22 @@ func (service *Service) requireOpen(poll sequencerstore.Poll) error {
 	return nil
 }
 
+func (service *Service) requireIssuer(poll sequencerstore.Poll) error {
+	issuerKeyID := blind.KeyID(&service.issuer.PublicKey)
+	issuerPublicKey, err := blind.EncodePublicKey(&service.issuer.PublicKey)
+	if err != nil {
+		return &Error{Code: "issuer_key_mismatch", Err: err}
+	}
+	var artifact Poll
+	if err := protocol.DecodeStrict(poll.Artifact, &artifact); err != nil {
+		return &Error{Code: "invalid_stored_poll", Err: err}
+	}
+	if poll.IssuerKeyID != issuerKeyID || artifact.IssuerKeyID != issuerKeyID || artifact.IssuerPublicKey != issuerPublicKey {
+		return &Error{Code: "issuer_key_mismatch"}
+	}
+	return nil
+}
+
 func (service *Service) checkpoint(pollID string, sequence uint64, eventHash string) (Checkpoint, []byte, error) {
 	return service.streamCheckpoint("vota:checkpoint:v1", pollID, sequence, eventHash)
 }

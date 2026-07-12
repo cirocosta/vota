@@ -243,6 +243,9 @@ func (service *Service) Claim(ctx context.Context, pollID string, request ClaimR
 		if err != nil {
 			return err
 		}
+		if err := service.requireIssuer(poll); err != nil {
+			return err
+		}
 		if err := service.requireOpen(poll); err != nil {
 			return err
 		}
@@ -297,20 +300,38 @@ func (service *Service) Claim(ctx context.Context, pollID string, request ClaimR
 	return response, created, err
 }
 
-func (service *Service) Vote(ctx context.Context, pollID string, request BallotRequest) (Receipt, error) {
+func (service *Service) Vote(ctx context.Context, pollID string, request BallotRequest) (Receipt, bool, error) {
 	poll, err := service.Poll(ctx, pollID)
 	if err != nil {
-		return Receipt{}, err
+		return Receipt{}, false, err
 	}
 	_, credentialHash, err := verifyWireCredential(poll, request.Credential)
 	if err != nil {
-		return Receipt{}, err
+		return Receipt{}, false, err
 	}
 	var receipt Receipt
+	created := false
 	err = service.store.Transaction(ctx, func(tx *sequencerstore.Tx) error {
 		storedPoll, err := tx.Poll(ctx, pollID)
 		if err != nil {
 			return err
+		}
+		existing, found, err := tx.BallotByCredential(ctx, pollID, credentialHash)
+		if err != nil {
+			return err
+		}
+		if found {
+			var record BallotRecord
+			if err := protocol.DecodeStrict(existing.Artifact, &record); err != nil {
+				return &Error{Code: "invalid_stored_ballot", Err: err}
+			}
+			if record.CredentialHash != credentialHash || record.ChoiceID != request.ChoiceID || record.Credential != request.Credential {
+				return &Error{Code: "credential_already_spent"}
+			}
+			if err := protocol.DecodeStrict(existing.Receipt, &receipt); err != nil {
+				return &Error{Code: "invalid_stored_receipt", Err: err}
+			}
+			return nil
 		}
 		if err := service.requireOpen(storedPoll); err != nil {
 			return err
@@ -333,7 +354,7 @@ func (service *Service) Vote(ctx context.Context, pollID string, request BallotR
 		if err != nil {
 			return err
 		}
-		receipt = Receipt{SchemaVersion: SchemaVersion, Protocol: Protocol, PollID: pollID, Sequence: sequence, CredentialHash: credentialHash, EventHash: eventHash, Checkpoint: checkpoint}
+		receipt = Receipt{SchemaVersion: SchemaVersion, Protocol: Protocol, PollID: pollID, Sequence: sequence, CredentialHash: credentialHash, ChoiceID: request.ChoiceID, EventHash: eventHash, Checkpoint: checkpoint}
 		receipt.Signature, err = service.signValue("vota:receipt:v1", receipt)
 		if err != nil {
 			return err
@@ -346,7 +367,11 @@ func (service *Service) Vote(ctx context.Context, pollID string, request BallotR
 		if err := tx.InsertBallotEvent(ctx, event); err != nil {
 			return err
 		}
-		return tx.SaveCheckpoint(ctx, sequencerstore.Checkpoint{PollID: pollID, BallotSequence: sequence, EventHash: eventHash, Artifact: encodedCheckpoint})
+		if err := tx.SaveCheckpoint(ctx, sequencerstore.Checkpoint{PollID: pollID, BallotSequence: sequence, EventHash: eventHash, Artifact: encodedCheckpoint}); err != nil {
+			return err
+		}
+		created = true
+		return nil
 	})
-	return receipt, err
+	return receipt, created, err
 }
