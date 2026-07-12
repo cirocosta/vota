@@ -176,7 +176,7 @@ func decodeSignature(value string) ([]byte, error) {
 		return nil, fmt.Errorf("missing signature prefix")
 	}
 	decoded, err := hex.DecodeString(payload)
-	if err != nil || len(decoded) != ed25519.SignatureSize {
+	if err != nil || len(decoded) != ed25519.SignatureSize || payload != strings.ToLower(payload) {
 		return nil, fmt.Errorf("invalid signature")
 	}
 	return decoded, nil
