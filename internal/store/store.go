@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync/atomic"
 
 	"github.com/cirocosta/vota/migrations"
 	"modernc.org/sqlite"
@@ -18,6 +19,8 @@ import (
 type Store struct {
 	db *sql.DB
 }
+
+var memoryStoreID atomic.Uint64
 
 type Tx struct {
 	tx *sql.Tx
@@ -210,8 +213,9 @@ func (store *Store) migrate(ctx context.Context) error {
 }
 
 func dataSourceName(path string) string {
-	if path == ":memory:" {
-		path = "file:vota-memory"
+	memory := path == ":memory:"
+	if memory {
+		path = fmt.Sprintf("file:vota-memory-%d", memoryStoreID.Add(1))
 	} else if !strings.HasPrefix(path, "file:") {
 		path = "file:" + filepath.ToSlash(path)
 	}
@@ -224,7 +228,7 @@ func dataSourceName(path string) string {
 	parameters.Add("_pragma", "foreign_keys(1)")
 	parameters.Add("_pragma", "journal_mode(WAL)")
 	parameters.Set("_txlock", "immediate")
-	if strings.Contains(path, "vota-memory") {
+	if memory {
 		parameters.Set("cache", "shared")
 		parameters.Set("mode", "memory")
 	}
