@@ -123,6 +123,27 @@ func (store *Store) Credit(ctx context.Context, pollID, fingerprint string) (Cre
 	return credit(ctx, store.db, pollID, fingerprint)
 }
 
+func (store *Store) Credits(ctx context.Context, pollID string) ([]Credit, error) {
+	rows, err := store.db.QueryContext(ctx, `SELECT ssh_fingerprint FROM poll_credits WHERE poll_id = ? ORDER BY ssh_fingerprint`, pollID)
+	if err != nil {
+		return nil, &Error{Code: "credit_read_failed", Err: err}
+	}
+	defer rows.Close()
+	var output []Credit
+	for rows.Next() {
+		var fingerprint string
+		if err := rows.Scan(&fingerprint); err != nil {
+			return nil, &Error{Code: "credit_read_failed", Err: err}
+		}
+		value, err := credit(ctx, store.db, pollID, fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		output = append(output, value)
+	}
+	return output, rows.Err()
+}
+
 func credit(ctx context.Context, query queryer, pollID, fingerprint string) (Credit, error) {
 	var value Credit
 	var requestID, blindedHash, claimedAt sql.NullString

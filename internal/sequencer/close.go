@@ -26,6 +26,10 @@ func (service *Service) ClosePoll(ctx context.Context, pollID string, request Cl
 	if err != nil || sshsig.Verify(adminKey, AdminNamespace, message, signature) != nil {
 		return Tally{}, false, &Error{Code: "invalid_ssh_signature", Err: err}
 	}
+	signedPoll, err := service.Poll(ctx, pollID)
+	if err != nil {
+		return Tally{}, false, err
+	}
 
 	var tally Tally
 	created := false
@@ -39,20 +43,19 @@ func (service *Service) ClosePoll(ctx context.Context, pollID string, request Cl
 			if err != nil {
 				return err
 			}
-			return protocol.DecodeStrict(stored.Artifact, &tally)
+			if err := protocol.DecodeStrict(stored.Artifact, &tally); err != nil {
+				return err
+			}
+			return VerifyTallyForPoll(signedPoll, tally)
 		}
-		if poll.State != "open" {
+		if poll.State != "open" || poll.ClosesAt != signedPoll.ClosesAt {
 			return &Error{Code: "poll_not_open"}
 		}
-		choices, err := tx.Choices(ctx, pollID)
-		if err != nil {
-			return err
-		}
-		totals := make([]ChoiceTotal, len(choices))
-		positions := make(map[string]int, len(choices))
-		for index, choice := range choices {
-			totals[index] = ChoiceTotal{ChoiceID: choice.ChoiceID}
-			positions[choice.ChoiceID] = index
+		totals := make([]ChoiceTotal, len(signedPoll.Choices))
+		positions := make(map[string]int, len(signedPoll.Choices))
+		for index, choice := range signedPoll.Choices {
+			totals[index] = ChoiceTotal{ChoiceID: choice.ID}
+			positions[choice.ID] = index
 		}
 		events, err := tx.BallotEvents(ctx, pollID)
 		if err != nil {
@@ -60,6 +63,9 @@ func (service *Service) ClosePoll(ctx context.Context, pollID string, request Cl
 		}
 		ballotCount := 0
 		for _, event := range events {
+			if event.Type == "poll_closed" {
+				return &Error{Code: "poll_not_open"}
+			}
 			if event.Type != "ballot_accepted" {
 				continue
 			}
@@ -110,12 +116,16 @@ func (service *Service) ClosePoll(ctx context.Context, pollID string, request Cl
 }
 
 func (service *Service) Result(ctx context.Context, pollID string) (Tally, error) {
-	poll, err := service.store.Poll(ctx, pollID)
+	storedPoll, err := service.store.Poll(ctx, pollID)
 	if err != nil {
 		return Tally{}, err
 	}
-	if poll.State != "closed" {
+	if storedPoll.State != "closed" {
 		return Tally{}, &Error{Code: "result_unavailable"}
+	}
+	poll, err := service.Poll(ctx, pollID)
+	if err != nil {
+		return Tally{}, err
 	}
 	stored, err := service.store.Tally(ctx, pollID)
 	if err != nil {
@@ -123,6 +133,9 @@ func (service *Service) Result(ctx context.Context, pollID string) (Tally, error
 	}
 	var tally Tally
 	if err := protocol.DecodeStrict(stored.Artifact, &tally); err != nil {
+		return Tally{}, &Error{Code: "invalid_stored_tally", Err: err}
+	}
+	if err := VerifyTallyForPoll(poll, tally); err != nil {
 		return Tally{}, &Error{Code: "invalid_stored_tally", Err: err}
 	}
 	return tally, nil

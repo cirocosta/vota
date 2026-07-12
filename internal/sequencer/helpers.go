@@ -173,7 +173,14 @@ func (service *Service) requireOpen(poll sequencerstore.Poll) error {
 	if poll.State != "open" {
 		return &Error{Code: "poll_not_open"}
 	}
-	closesAt, err := time.Parse(time.RFC3339, poll.ClosesAt)
+	var artifact Poll
+	if err := protocol.DecodeStrict(poll.Artifact, &artifact); err != nil || artifact.PollID != poll.PollID || artifact.ClosesAt != poll.ClosesAt {
+		return &Error{Code: "projection_content_mismatch", Err: err}
+	}
+	if err := VerifyPollArtifact(artifact); err != nil {
+		return &Error{Code: "invalid_stored_poll", Err: err}
+	}
+	closesAt, err := time.Parse(time.RFC3339, artifact.ClosesAt)
 	if err != nil {
 		return &Error{Code: "invalid_stored_poll", Err: err}
 	}
