@@ -1,13 +1,11 @@
 package protocol
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
 	"slices"
 	"strings"
-	"time"
 )
 
 var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,31}$`)
@@ -117,19 +115,13 @@ func ValidateManifest(manifest Manifest) error {
 	if manifest.PrivacyThreshold < MinPrivacyThreshold || manifest.PrivacyThreshold > len(manifest.EligibleKeys) {
 		return validationError("invalid_privacy_threshold", "privacy_threshold", "threshold must be between 2 and eligible key count")
 	}
-	opensAt, err := time.Parse(time.RFC3339, manifest.OpensAt)
+	opensAt, err := ParseCanonicalTime(manifest.OpensAt)
 	if err != nil {
 		return validationError("invalid_opens_at", "opens_at", err.Error())
 	}
-	if opensAt.UTC().Format(time.RFC3339) != manifest.OpensAt {
-		return validationError("invalid_opens_at", "opens_at", "time must be normalized UTC RFC3339")
-	}
-	closesAt, err := time.Parse(time.RFC3339, manifest.ClosesAt)
+	closesAt, err := ParseCanonicalTime(manifest.ClosesAt)
 	if err != nil {
 		return validationError("invalid_closes_at", "closes_at", err.Error())
-	}
-	if closesAt.UTC().Format(time.RFC3339) != manifest.ClosesAt {
-		return validationError("invalid_closes_at", "closes_at", "time must be normalized UTC RFC3339")
 	}
 	if !opensAt.Before(closesAt) {
 		return validationError("invalid_poll_window", "closes_at", "close time must be after open time")
@@ -200,35 +192,11 @@ func validateHeader(schema int, protocol string) error {
 }
 
 func validateEncoded(prefix string, byteLength int, value string) error {
-	encoded, ok := strings.CutPrefix(value, prefix+":")
-	if !ok {
-		return fmt.Errorf("expected %s prefix", prefix)
-	}
-	if len(encoded) != byteLength*2 {
-		return fmt.Errorf("expected %d encoded bytes", byteLength)
-	}
-	if _, err := hex.DecodeString(encoded); err != nil {
-		return fmt.Errorf("decode hex: %w", err)
-	}
-	if encoded != strings.ToLower(encoded) {
-		return fmt.Errorf("hex must be lowercase")
-	}
-	return nil
+	_, err := DecodeFixedHex(prefix, value, byteLength)
+	return err
 }
 
 func validateOpaque(prefix, value string) error {
-	encoded, ok := strings.CutPrefix(value, prefix+":")
-	if !ok {
-		return fmt.Errorf("expected %s prefix", prefix)
-	}
-	if len(encoded) < 2 || len(encoded)%2 != 0 {
-		return fmt.Errorf("opaque value must contain non-empty even-length hex")
-	}
-	if _, err := hex.DecodeString(encoded); err != nil {
-		return fmt.Errorf("decode hex: %w", err)
-	}
-	if encoded != strings.ToLower(encoded) {
-		return fmt.Errorf("hex must be lowercase")
-	}
-	return nil
+	_, err := DecodeOpaqueHex(prefix, value)
+	return err
 }
