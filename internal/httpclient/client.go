@@ -52,6 +52,12 @@ func (client *Client) PublishPoll(ctx context.Context, manifest protocol.Manifes
 	return result, status == http.StatusCreated, err
 }
 
+func (client *Client) PublishPollArtifact(ctx context.Context, encoded []byte, adminToken string) (protocol.Manifest, bool, error) {
+	var result protocol.Manifest
+	status, err := client.doRawJSON(ctx, http.MethodPost, "/v1/polls", encoded, adminToken, &result)
+	return result, status == http.StatusCreated, err
+}
+
 func (client *Client) Poll(ctx context.Context, pollID string) (app.PollStatus, error) {
 	var result app.PollStatus
 	_, err := client.doJSON(ctx, http.MethodGet, "/v1/polls/"+url.PathEscape(pollID), nil, "", &result)
@@ -61,6 +67,12 @@ func (client *Client) Poll(ctx context.Context, pollID string) (app.PollStatus, 
 func (client *Client) SubmitBallot(ctx context.Context, ballot protocol.BallotEnvelope) (protocol.Receipt, bool, error) {
 	var result protocol.Receipt
 	status, err := client.doJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(ballot.PollID)+"/ballots", ballot, "", &result)
+	return result, status == http.StatusCreated, err
+}
+
+func (client *Client) SubmitBallotArtifact(ctx context.Context, pollID string, encoded []byte) (protocol.Receipt, bool, error) {
+	var result protocol.Receipt
+	status, err := client.doRawJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(pollID)+"/ballots", encoded, "", &result)
 	return result, status == http.StatusCreated, err
 }
 
@@ -82,6 +94,14 @@ func (client *Client) SubmitTrusteeShare(ctx context.Context, share protocol.Tru
 		Tally *protocol.Tally `json:"tally"`
 	}
 	status, err := client.doJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(share.PollID)+"/tally-shares", share, "", &result)
+	return result.Tally, status == http.StatusCreated, err
+}
+
+func (client *Client) SubmitTrusteeShareArtifact(ctx context.Context, pollID string, encoded []byte) (*protocol.Tally, bool, error) {
+	var result struct {
+		Tally *protocol.Tally `json:"tally"`
+	}
+	status, err := client.doRawJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(pollID)+"/tally-shares", encoded, "", &result)
 	return result.Tally, status == http.StatusCreated, err
 }
 
@@ -132,6 +152,10 @@ func (client *Client) doJSON(ctx context.Context, method, path string, input any
 			return 0, err
 		}
 	}
+	return client.doRawJSON(ctx, method, path, body, adminToken, output)
+}
+
+func (client *Client) doRawJSON(ctx context.Context, method, path string, body []byte, adminToken string, output any) (int, error) {
 	request, err := client.request(ctx, method, path, body, adminToken)
 	if err != nil {
 		return 0, err

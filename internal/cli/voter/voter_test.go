@@ -2,9 +2,13 @@ package voter
 
 import (
 	"bytes"
+	"context"
+	"crypto/ed25519"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,9 +18,11 @@ import (
 
 	"github.com/cirocosta/vota/internal/app"
 	"github.com/cirocosta/vota/internal/crypto/lrs"
+	"github.com/cirocosta/vota/internal/httpapi"
 	"github.com/cirocosta/vota/internal/keystore"
 	"github.com/cirocosta/vota/internal/manifest"
 	"github.com/cirocosta/vota/internal/protocol"
+	"github.com/cirocosta/vota/internal/store"
 	"github.com/creack/pty"
 	"github.com/spf13/cobra"
 )
@@ -226,10 +232,71 @@ func TestVoteCastValidatesBeforeChoicePrompt(t *testing.T) {
 	}
 }
 
+func TestSubmitPreservesBallotFileBytes(t *testing.T) {
+	directory := t.TempDir()
+	ballotPath := filepath.Join(directory, "ballot.json")
+	receiptPath := filepath.Join(directory, "receipt.json")
+	encoded, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "app", "ballot.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ballot protocol.BallotEnvelope
+	if err := protocol.DecodeStrict(bytes.TrimSpace(encoded), &ballot); err != nil {
+		t.Fatal(err)
+	}
+	pretty, err := json.MarshalIndent(ballot, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(ballotPath, pretty, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	server := testCollector(t)
+	command := commandRoot(testOptions())
+	command.SetOut(io.Discard)
+	command.SetArgs([]string{"vote", "submit", "--ballot", ballotPath, "--server", server.URL, "--receipt", receiptPath})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "noncanonical_json") {
+		t.Fatalf("submit error = %v", err)
+	}
+	if _, err := os.Stat(receiptPath); !os.IsNotExist(err) {
+		t.Fatalf("receipt stat error = %v", err)
+	}
+}
+
 func commandRoot(options Options) *cobra.Command {
 	root := &cobra.Command{Use: "vota", SilenceErrors: true, SilenceUsage: true}
 	root.AddCommand(Commands(options)...)
 	return root
+}
+
+func testCollector(tb testing.TB) *httptest.Server {
+	tb.Helper()
+	database, err := store.Open(context.Background(), filepath.Join(tb.TempDir(), "vota.db"))
+	if err != nil {
+		tb.Fatalf("open store: %v", err)
+	}
+	tb.Cleanup(func() { _ = database.Close() })
+	service, err := app.NewService(database, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0xa1}, ed25519.SeedSize)), app.ServiceOptions{
+		Now: func() time.Time { return time.Date(2026, 8, 1, 13, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		tb.Fatalf("new service: %v", err)
+	}
+	manifestBytes, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "manifest", "canonical.json"))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	if _, _, err := service.PublishPoll(context.Background(), bytes.TrimSpace(manifestBytes)); err != nil {
+		tb.Fatalf("publish poll: %v", err)
+	}
+	api, err := httpapi.New(httpapi.Config{Service: service})
+	if err != nil {
+		tb.Fatalf("new API: %v", err)
+	}
+	server := httptest.NewServer(api)
+	tb.Cleanup(server.Close)
+	return server
 }
 
 func testOptions() Options {
