@@ -46,6 +46,24 @@ func TestGenesisAppendCheckpointAndReceipt(t *testing.T) {
 	if err := VerifyReceipt(publicKey, receipt, events[1], checkpoint); err != nil {
 		t.Fatalf("verify receipt: %v", err)
 	}
+	uppercaseCheckpoint := checkpoint
+	prefix, payload, ok := strings.Cut(uppercaseCheckpoint.Signature, ":")
+	if !ok {
+		t.Fatal("checkpoint signature missing prefix")
+	}
+	uppercaseCheckpoint.Signature = prefix + ":" + strings.ToUpper(payload)
+	if err := VerifyCheckpoint(publicKey, uppercaseCheckpoint); ErrorCode(err) != "invalid_checkpoint_signature" {
+		t.Fatalf("uppercase checkpoint signature error = %v", err)
+	}
+	uppercaseReceipt := receipt
+	prefix, payload, ok = strings.Cut(uppercaseReceipt.Signature, ":")
+	if !ok {
+		t.Fatal("receipt signature missing prefix")
+	}
+	uppercaseReceipt.Signature = prefix + ":" + strings.ToUpper(payload)
+	if err := VerifyReceipt(publicKey, uppercaseReceipt, events[1], checkpoint); ErrorCode(err) != "invalid_receipt_signature" {
+		t.Fatalf("uppercase receipt signature error = %v", err)
+	}
 	receiptBytes, err := protocol.MarshalCanonical(receipt)
 	if err != nil {
 		t.Fatal(err)
