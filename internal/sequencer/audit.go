@@ -265,7 +265,20 @@ func (service *Service) Ready(ctx context.Context) error {
 		if _, err := sequencerstore.ReplayCredit(creditEvents); err != nil {
 			return err
 		}
+		seenCredits := make(map[string]struct{}, len(creditEvents))
 		for _, event := range creditEvents {
+			var record creditRecord
+			if err := protocol.DecodeStrict(event.Artifact, &record); err != nil || record.Type != "credit_claimed" || record.SSHFingerprint == "" {
+				return &Error{Code: "projection_content_mismatch", Err: err}
+			}
+			if _, duplicate := seenCredits[record.SSHFingerprint]; duplicate {
+				return &Error{Code: "projection_content_mismatch"}
+			}
+			seenCredits[record.SSHFingerprint] = struct{}{}
+			credit, err := service.store.Credit(ctx, poll.PollID, record.SSHFingerprint)
+			if err != nil || credit.IssuanceRequestID != record.IssuanceRequestID || credit.BlindedMessageHash != record.BlindedMessageHash || hashBytes("vota:blind-signature:v1", credit.BlindSignature) != record.BlindSignatureHash {
+				return &Error{Code: "projection_content_mismatch", Err: err}
+			}
 			var checkpoint Checkpoint
 			if err := protocol.DecodeStrict(event.Signature, &checkpoint); err != nil || checkpoint.PollID != poll.PollID || checkpoint.Sequence != event.Sequence || checkpoint.EventHash != event.EventHash {
 				return &Error{Code: "invalid_credit_checkpoint", Err: err}
@@ -304,6 +317,10 @@ func (service *Service) Ready(ctx context.Context) error {
 				return &Error{Code: "invalid_credential", Err: err}
 			}
 			seenCredentials[record.CredentialHash] = struct{}{}
+			projected, found, err := service.store.BallotByCredential(ctx, poll.PollID, record.CredentialHash)
+			if err != nil || !found || projected.Sequence != event.Sequence || projected.EventHash != event.EventHash {
+				return &Error{Code: "projection_content_mismatch", Err: err}
+			}
 			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash || receipt.ChoiceID != record.ChoiceID {
 				return &Error{Code: "invalid_stored_receipt", Err: err}
 			}

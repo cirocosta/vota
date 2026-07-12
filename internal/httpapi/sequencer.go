@@ -84,10 +84,12 @@ func NewSequencer(config SequencerConfig) (*SequencerAPI, error) {
 	}
 	if config.PublicBaseURL != "" {
 		parsed, err := url.Parse(config.PublicBaseURL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		if err != nil || !isHTTPURL(parsed) {
 			return nil, errors.New("invalid public base URL")
 		}
-		config.PublicBaseURL = strings.TrimRight(config.PublicBaseURL, "/")
+		parsed.Path = strings.TrimRight(parsed.Path, "/")
+		parsed.RawPath = ""
+		config.PublicBaseURL = parsed.String()
 	}
 	api := &SequencerAPI{service: config.Service, publicBaseURL: config.PublicBaseURL, maxBodyBytes: config.MaxBodyBytes, requestTimeout: config.RequestTimeout, logger: config.Logger, mux: http.NewServeMux()}
 	api.routes()
@@ -101,15 +103,24 @@ func (api *SequencerAPI) ServeHTTP(response http.ResponseWriter, request *http.R
 	defer cancel()
 	request = request.WithContext(context.WithValue(ctx, requestIDKey{}, requestID))
 	recorder := &sequencerRecorder{ResponseWriter: response, status: http.StatusOK}
+	defer func() {
+		if recover() != nil {
+			if !recorder.wroteHeader {
+				api.error(recorder, request, http.StatusInternalServerError, "handler_panic")
+			} else {
+				recorder.errorCode = "handler_panic"
+			}
+		}
+		api.logger.InfoContext(ctx, "http request",
+			"request_id", requestID,
+			"method", request.Method,
+			"route", request.Pattern,
+			"status", recorder.status,
+			"duration_bucket", durationBucket(time.Since(started)),
+			"error_code", recorder.errorCode,
+		)
+	}()
 	api.mux.ServeHTTP(recorder, request)
-	api.logger.InfoContext(ctx, "http request",
-		"request_id", requestID,
-		"method", request.Method,
-		"route", request.Pattern,
-		"status", recorder.status,
-		"duration_bucket", durationBucket(time.Since(started)),
-		"error_code", recorder.errorCode,
-	)
 }
 
 func (api *SequencerAPI) routes() {
@@ -313,6 +324,10 @@ func sequencerPublicMessage(code string) string {
 	return strings.ReplaceAll(code, "_", " ")
 }
 
+func isHTTPURL(parsed *url.URL) bool {
+	return parsed != nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Opaque == ""
+}
+
 func durationBucket(duration time.Duration) string {
 	switch {
 	case duration < 10*time.Millisecond:
@@ -328,11 +343,23 @@ func durationBucket(duration time.Duration) string {
 
 type sequencerRecorder struct {
 	http.ResponseWriter
-	status    int
-	errorCode string
+	status      int
+	errorCode   string
+	wroteHeader bool
 }
 
 func (recorder *sequencerRecorder) WriteHeader(status int) {
+	if recorder.wroteHeader {
+		return
+	}
+	recorder.wroteHeader = true
 	recorder.status = status
 	recorder.ResponseWriter.WriteHeader(status)
+}
+
+func (recorder *sequencerRecorder) Write(body []byte) (int, error) {
+	if !recorder.wroteHeader {
+		recorder.WriteHeader(http.StatusOK)
+	}
+	return recorder.ResponseWriter.Write(body)
 }

@@ -69,6 +69,40 @@ func TestSequencerReadiness(t *testing.T) {
 	}
 }
 
+func TestSequencerRecoversPanicsWithoutLoggingSecrets(t *testing.T) {
+	var logs bytes.Buffer
+	api, err := NewSequencer(SequencerConfig{Service: testSequencerService(t), Logger: slog.New(slog.NewJSONHandler(&logs, nil))})
+	if err != nil {
+		t.Fatal(err)
+	}
+	const secret = "participant-secret-from-panic"
+	api.mux.HandleFunc("GET /panic", func(http.ResponseWriter, *http.Request) {
+		panic(secret)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/panic", nil)
+	request.RemoteAddr = "192.0.2.10:1234"
+	response := httptest.NewRecorder()
+	api.ServeHTTP(response, request)
+	if response.Code != http.StatusInternalServerError || !strings.Contains(response.Body.String(), "handler_panic") {
+		t.Fatalf("panic response = %d %s", response.Code, response.Body.String())
+	}
+	if strings.Contains(logs.String(), secret) || strings.Contains(logs.String(), "192.0.2.10") {
+		t.Fatalf("panic data leaked to logs: %s", logs.String())
+	}
+}
+
+func TestSequencerRejectsUnsafePublicBaseURLs(t *testing.T) {
+	service := testSequencerService(t)
+	for _, value := range []string{
+		"ftp://vota.example", "https://user:pass@vota.example",
+		"https://vota.example?token=secret", "https://vota.example#fragment",
+	} {
+		if _, err := NewSequencer(SequencerConfig{Service: service, PublicBaseURL: value}); err == nil {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+}
+
 func testSequencerService(tb testing.TB) *sequencer.Service {
 	tb.Helper()
 	store, err := sequencerstore.Open(context.Background(), ":memory:")

@@ -55,19 +55,24 @@ func (client *Client) SequencerAudit(ctx context.Context, pollID string) (sequen
 // ParsePollURL separates a shareable poll URL into its server base and poll ID.
 func ParsePollURL(value string) (string, string, error) {
 	parsed, err := url.Parse(value)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+	if err != nil || !isHTTPURL(parsed) {
 		return "", "", fmt.Errorf("invalid poll URL")
 	}
 	marker := "/polls/"
-	index := strings.LastIndex(parsed.EscapedPath(), marker)
+	escapedPath := parsed.EscapedPath()
+	index := strings.LastIndex(escapedPath, marker)
 	if index < 0 {
 		return "", "", fmt.Errorf("invalid poll URL")
 	}
-	pollID, err := url.PathUnescape(parsed.EscapedPath()[index+len(marker):])
+	pollID, err := url.PathUnescape(escapedPath[index+len(marker):])
 	if err != nil || pollID == "" || strings.Contains(pollID, "/") {
 		return "", "", fmt.Errorf("invalid poll URL")
 	}
-	parsed.Path = strings.TrimRight(parsed.Path[:index], "/")
+	basePath, err := url.PathUnescape(escapedPath[:index])
+	if err != nil {
+		return "", "", fmt.Errorf("invalid poll URL")
+	}
+	parsed.Path = strings.TrimRight(basePath, "/")
 	parsed.RawPath = ""
 	return strings.TrimRight(parsed.String(), "/"), pollID, nil
 }

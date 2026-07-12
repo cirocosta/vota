@@ -38,6 +38,9 @@ issue valid credentials or prove continuity of signed history.
 `admin.keys` contains one canonical `ssh-ed25519` public key per line. A
 display name before the key is also accepted.
 
+`public_base_url` must be an `http` or `https` URL without credentials, a
+query, or a fragment. A path prefix is supported.
+
 ```text
 alice ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
 ```

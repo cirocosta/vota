@@ -2,6 +2,8 @@ package httpapi
 
 import (
 	"context"
+	"io"
+	"log"
 	"net/http"
 	"time"
 )
@@ -40,6 +42,7 @@ func NewServer(config ServerConfig) *http.Server {
 		WriteTimeout:      config.WriteTimeout,
 		IdleTimeout:       config.IdleTimeout,
 		MaxHeaderBytes:    config.MaxHeaderBytes,
+		ErrorLog:          log.New(io.Discard, "", 0),
 	}
 }
 

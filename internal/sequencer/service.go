@@ -35,6 +35,14 @@ type Service struct {
 	now               func() time.Time
 }
 
+type creditRecord struct {
+	Type               string `json:"type"`
+	SSHFingerprint     string `json:"ssh_fingerprint"`
+	IssuanceRequestID  string `json:"issuance_request_id"`
+	BlindedMessageHash string `json:"blinded_message_hash"`
+	BlindSignatureHash string `json:"blind_signature_hash"`
+}
+
 type Error struct {
 	Code string
 	Err  error
@@ -278,12 +286,11 @@ func (service *Service) Claim(ctx context.Context, pollID string, request ClaimR
 		if err != nil {
 			return err
 		}
-		artifact, _ := protocol.MarshalCanonical(struct {
-			Type               string `json:"type"`
-			SSHFingerprint     string `json:"ssh_fingerprint"`
-			IssuanceRequestID  string `json:"issuance_request_id"`
-			BlindedMessageHash string `json:"blinded_message_hash"`
-		}{"credit_claimed", fingerprint, requestIDCanonical, blindedHash})
+		artifact, _ := protocol.MarshalCanonical(creditRecord{
+			Type: "credit_claimed", SSHFingerprint: fingerprint,
+			IssuanceRequestID: requestIDCanonical, BlindedMessageHash: blindedHash,
+			BlindSignatureHash: hashBytes("vota:blind-signature:v1", blindSignature),
+		})
 		event := sequencerstore.CreditEvent{PollID: pollID, Sequence: sequence, PreviousHash: previous, Artifact: artifact, RecordedAt: now}
 		event.EventHash = sequencerstore.EventHash("credit", pollID, sequence, previous, artifact)
 		_, event.Signature, err = service.creditCheckpoint(pollID, sequence, event.EventHash)
