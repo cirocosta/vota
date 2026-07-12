@@ -237,6 +237,33 @@ func TestTallyShareCommandAcceptsOnlyValidAggregateRecord(t *testing.T) {
 	}
 }
 
+func TestValidateConfigRejectsUppercasePublicKeys(t *testing.T) {
+	t.Parallel()
+
+	signingPrivate := ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0x32}, ed25519.SeedSize))
+	transportPrivate, err := ecdh.X25519().NewPrivateKey(bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := CeremonyConfig{
+		SchemaVersion: protocol.SchemaVersion,
+		Protocol:      protocol.ProtocolVersion,
+		Quorum:        2,
+		Trustees: []Participant{
+			{ID: "trustee-1", SigningKey: "ed25519:" + strings.ToUpper(hex.EncodeToString(signingPrivate.Public().(ed25519.PublicKey))), TransportKey: "x25519:" + hex.EncodeToString(transportPrivate.PublicKey().Bytes())},
+			{ID: "trustee-2", SigningKey: "ed25519:" + strings.Repeat("02", ed25519.PublicKeySize), TransportKey: "x25519:" + strings.Repeat("03", 32)},
+		},
+	}
+	if err := validateConfig(config); err == nil {
+		t.Fatal("uppercase signing key accepted")
+	}
+	config.Trustees[0].SigningKey = "ed25519:" + hex.EncodeToString(signingPrivate.Public().(ed25519.PublicKey))
+	config.Trustees[0].TransportKey = "x25519:" + strings.ToUpper(hex.EncodeToString(transportPrivate.PublicKey().Bytes()))
+	if err := validateConfig(config); err == nil {
+		t.Fatal("uppercase transport key accepted")
+	}
+}
+
 func commandRoot(options Options) *cobra.Command {
 	root := &cobra.Command{Use: "vota", SilenceErrors: true, SilenceUsage: true}
 	root.AddCommand(Commands(options)...)
