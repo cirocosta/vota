@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"bytes"
 	"crypto/ed25519"
 	"encoding/hex"
 	"fmt"
@@ -59,6 +60,13 @@ func ParseBundle(encoded []byte, expectedKeys ...ed25519.PublicKey) (Bundle, err
 	}
 	if err := VerifyBundle(bundle, checkpointKey); err != nil {
 		return Bundle{}, err
+	}
+	canonical, err := protocol.MarshalCanonical(bundle)
+	if err != nil {
+		return Bundle{}, &Error{Code: "invalid_audit_bundle", Err: err}
+	}
+	if !bytes.Equal(encoded, canonical) {
+		return Bundle{}, &Error{Code: "noncanonical_audit_bundle"}
 	}
 	return bundle, nil
 }

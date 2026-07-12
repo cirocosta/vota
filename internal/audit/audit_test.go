@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -145,6 +146,28 @@ func TestBundleExportParseAndPublicSchema(t *testing.T) {
 		if bytes.Contains(encoded, []byte(forbidden)) {
 			t.Fatalf("public bundle contains %q", forbidden)
 		}
+	}
+}
+
+func TestParseBundleRejectsNoncanonicalEncoding(t *testing.T) {
+	t.Parallel()
+
+	value := testManifest(t).Manifest()
+	privateKey := checkpointPrivateKey()
+	bundle := sparseBundle(t, value, testEvents(t, value.PollID), privateKey)
+	canonical, err := protocol.MarshalCanonical(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, canonical, "", "  "); err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(pretty.Bytes(), canonical) {
+		t.Fatal("pretty encoding did not change bundle bytes")
+	}
+	if _, err := ParseBundle(pretty.Bytes(), privateKey.Public().(ed25519.PublicKey)); ErrorCode(err) != "noncanonical_audit_bundle" {
+		t.Fatalf("parse error = %v", err)
 	}
 }
 
