@@ -2,6 +2,7 @@
 package keystore
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -170,7 +171,7 @@ func Open(encoded []byte, expectedRole Role, passphrase []byte) ([]byte, Envelop
 	if err := validateKeyID(envelope.KeyID); err != nil {
 		return nil, Envelope{}, err
 	}
-	if _, err := time.Parse(time.RFC3339, envelope.CreatedAt); err != nil {
+	if _, err := protocol.ParseCanonicalTime(envelope.CreatedAt); err != nil {
 		return nil, Envelope{}, &Error{Code: "invalid_keystore", Err: fmt.Errorf("created_at: %w", err)}
 	}
 	if err := validateKDF(envelope.KDF); err != nil {
@@ -189,14 +190,11 @@ func Open(encoded []byte, expectedRole Role, passphrase []byte) ([]byte, Envelop
 		return nil, Envelope{}, &Error{Code: "invalid_keystore"}
 	}
 	checksum := sha256.Sum256(ciphertext)
-	checksumPayload, ok := strings.CutPrefix(envelope.CiphertextChecksum, "sha256:")
-	if !ok || len(checksumPayload) != sha256.Size*2 || checksumPayload != strings.ToLower(checksumPayload) {
-		return nil, Envelope{}, &Error{Code: "invalid_keystore"}
-	}
-	if _, err := hex.DecodeString(checksumPayload); err != nil {
+	checksumBytes, err := protocol.DecodeFixedHex("sha256", envelope.CiphertextChecksum, sha256.Size)
+	if err != nil {
 		return nil, Envelope{}, &Error{Code: "invalid_keystore", Err: fmt.Errorf("ciphertext_checksum: %w", err)}
 	}
-	if checksumPayload != hex.EncodeToString(checksum[:]) {
+	if !bytes.Equal(checksumBytes, checksum[:]) {
 		return nil, Envelope{}, &Error{Code: "key_unlock_failed"}
 	}
 	aad, err := associatedData(envelope)
@@ -337,15 +335,9 @@ func associatedData(envelope Envelope) ([]byte, error) {
 }
 
 func decodeHex(field, value string, expectedBytes int) ([]byte, error) {
-	decoded, err := hex.DecodeString(value)
+	decoded, err := protocol.DecodeRawHex(value, expectedBytes)
 	if err != nil {
 		return nil, &Error{Code: "invalid_keystore", Err: fmt.Errorf("%s: %w", field, err)}
-	}
-	if value != strings.ToLower(value) {
-		return nil, &Error{Code: "invalid_keystore", Err: fmt.Errorf("%s: hex must be lowercase", field)}
-	}
-	if expectedBytes >= 0 && len(decoded) != expectedBytes {
-		return nil, &Error{Code: "invalid_keystore", Err: fmt.Errorf("%s: expected %d bytes", field, expectedBytes)}
 	}
 	return decoded, nil
 }
