@@ -165,8 +165,8 @@ func newCastCommand(options Options) *cobra.Command {
 			}
 			value := frozen.Manifest()
 			now := options.Now().UTC()
-			opensAt, _ := time.Parse(time.RFC3339, value.OpensAt)
-			closesAt, _ := time.Parse(time.RFC3339, value.ClosesAt)
+			opensAt, _ := protocol.ParseCanonicalTime(value.OpensAt)
+			closesAt, _ := protocol.ParseCanonicalTime(value.ClosesAt)
 			if now.Before(opensAt) {
 				return fmt.Errorf("poll_not_open")
 			}
@@ -451,15 +451,11 @@ func createFile(path string, data []byte, mode os.FileMode) error {
 }
 
 func decodeValue(value, prefix string, size int) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, prefix+":")
-	if !ok {
+	if _, ok := strings.CutPrefix(value, prefix+":"); !ok {
 		return nil, fmt.Errorf("expected %s value", prefix)
 	}
-	if payload != strings.ToLower(payload) {
-		return nil, fmt.Errorf("invalid %s value", prefix)
-	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil || len(decoded) != size {
+	decoded, err := protocol.DecodeFixedHex(prefix, value, size)
+	if err != nil {
 		return nil, fmt.Errorf("invalid %s value", prefix)
 	}
 	return decoded, nil

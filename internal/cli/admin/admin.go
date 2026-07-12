@@ -420,8 +420,8 @@ func ManifestDraft(draft DraftFile) manifest.Draft {
 		trustees[index] = manifest.Trustee{ID: trustee.ID, SigningKey: ed25519.PublicKey(signingKey), Contribution: contribution}
 	}
 	authorityKey, _ := decodeValue(draft.AuthorityKey, "ed25519", ed25519.PublicKeySize)
-	opensAt, _ := time.Parse(time.RFC3339, draft.Config.OpensAt)
-	closesAt, _ := time.Parse(time.RFC3339, draft.Config.ClosesAt)
+	opensAt, _ := protocol.ParseCanonicalTime(draft.Config.OpensAt)
+	closesAt, _ := protocol.ParseCanonicalTime(draft.Config.ClosesAt)
 	return manifest.Draft{
 		Question:         draft.Config.Question,
 		Choices:          draft.Config.Choices,
@@ -558,12 +558,19 @@ func writeCanonical(writer io.Writer, value any) error {
 }
 
 func decodeValue(value, prefix string, size int) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, prefix+":")
-	if !ok {
+	if _, ok := strings.CutPrefix(value, prefix+":"); !ok {
 		return nil, fmt.Errorf("expected %s value", prefix)
 	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil || (size >= 0 && len(decoded) != size) {
+	var (
+		decoded []byte
+		err     error
+	)
+	if size >= 0 {
+		decoded, err = protocol.DecodeFixedHex(prefix, value, size)
+	} else {
+		decoded, err = protocol.DecodeOpaqueHex(prefix, value)
+	}
+	if err != nil {
 		return nil, fmt.Errorf("invalid %s value", prefix)
 	}
 	return decoded, nil
