@@ -43,6 +43,11 @@ type creditRecord struct {
 	BlindSignatureHash string `json:"blind_signature_hash"`
 }
 
+type pollCreatedRecord struct {
+	Type     string `json:"type"`
+	PollHash string `json:"poll_hash"`
+}
+
 type Error struct {
 	Code string
 	Err  error
@@ -178,10 +183,7 @@ func (service *Service) CreatePoll(ctx context.Context, request CreatePollReques
 				return err
 			}
 		}
-		eventArtifact, _ := protocol.MarshalCanonical(struct {
-			Type     string `json:"type"`
-			PollHash string `json:"poll_hash"`
-		}{"poll_created", artifactHash})
+		eventArtifact, _ := protocol.MarshalCanonical(pollCreatedRecord{Type: "poll_created", PollHash: artifactHash})
 		event := sequencerstore.BallotEvent{PollID: pollID, Sequence: 1, Type: "poll_created", PreviousHash: sequencerstore.EmptyHash(), Artifact: eventArtifact, RecordedAt: now}
 		event.EventHash = sequencerstore.EventHash("ballot", pollID, 1, event.PreviousHash, eventArtifact)
 		checkpoint, encodedCheckpoint, err := service.checkpoint(pollID, 1, event.EventHash)
@@ -211,6 +213,9 @@ func (service *Service) Poll(ctx context.Context, pollID string) (Poll, error) {
 	}
 	var poll Poll
 	if err := protocol.DecodeStrict(stored.Artifact, &poll); err != nil {
+		return Poll{}, &Error{Code: "invalid_stored_poll", Err: err}
+	}
+	if err := VerifyPollArtifact(poll); err != nil {
 		return Poll{}, &Error{Code: "invalid_stored_poll", Err: err}
 	}
 	return poll, nil
@@ -316,6 +321,9 @@ func (service *Service) Vote(ctx context.Context, pollID string, request BallotR
 	if err != nil {
 		return Receipt{}, false, err
 	}
+	if !choiceExists(poll.Choices, request.ChoiceID) {
+		return Receipt{}, false, &Error{Code: "invalid_choice"}
+	}
 	var receipt Receipt
 	created := false
 	err = service.store.Transaction(ctx, func(tx *sequencerstore.Tx) error {
@@ -340,8 +348,18 @@ func (service *Service) Vote(ctx context.Context, pollID string, request BallotR
 			}
 			return nil
 		}
+		if storedPoll.ClosesAt != poll.ClosesAt {
+			return &Error{Code: "projection_content_mismatch"}
+		}
 		if err := service.requireOpen(storedPoll); err != nil {
 			return err
+		}
+		events, err := tx.BallotEvents(ctx, pollID)
+		if err != nil {
+			return err
+		}
+		if len(events) == 0 || events[len(events)-1].Type == "poll_closed" {
+			return &Error{Code: "poll_not_open"}
 		}
 		choices, err := tx.Choices(ctx, pollID)
 		if err != nil {

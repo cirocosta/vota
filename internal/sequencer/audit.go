@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"encoding/base64"
 
+	"github.com/cirocosta/vota/internal/crypto/sshsig"
 	"github.com/cirocosta/vota/internal/protocol"
 	"github.com/cirocosta/vota/internal/sequencerstore"
 )
@@ -66,6 +67,11 @@ func VerifyAudit(bundle AuditBundle) error {
 		return &Error{Code: "audit_sequence_gap"}
 	}
 	storeEvents := make([]sequencerstore.BallotEvent, len(bundle.Events))
+	pollArtifact, err := protocol.MarshalCanonical(bundle.Poll)
+	if err != nil {
+		return &Error{Code: "invalid_audit_bundle", Err: err}
+	}
+	pollArtifactHash := hashBytes("vota:poll-artifact:v1", pollArtifact)
 	seenCredentials := make(map[string]struct{})
 	totals := make(map[string]int)
 	ballotCount := 0
@@ -80,7 +86,8 @@ func VerifyAudit(bundle AuditBundle) error {
 		}
 		switch event.Type {
 		case "poll_created":
-			if index != 0 {
+			var record pollCreatedRecord
+			if index != 0 || protocol.DecodeStrict(event.Artifact, &record) != nil || record.Type != "poll_created" || record.PollHash != pollArtifactHash {
 				return &Error{Code: "invalid_poll_created_event"}
 			}
 		case "ballot_accepted":
@@ -100,7 +107,7 @@ func VerifyAudit(bundle AuditBundle) error {
 				return &Error{Code: "invalid_choice"}
 			}
 			var receipt Receipt
-			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash || receipt.ChoiceID != record.ChoiceID {
+			if err := protocol.DecodeStrict(event.Receipt, &receipt); err != nil || receipt.PollID != bundle.Poll.PollID || receipt.Sequence != event.Sequence || receipt.EventHash != event.EventHash || receipt.CredentialHash != record.CredentialHash || receipt.ChoiceID != record.ChoiceID {
 				return &Error{Code: "invalid_receipt", Err: err}
 			}
 			if err := VerifyReceipt(key, receipt); err != nil {
@@ -258,6 +265,9 @@ func (service *Service) Ready(ctx context.Context) error {
 		if err := VerifyPollArtifact(pollArtifact); err != nil {
 			return err
 		}
+		if err := service.verifyPollProjection(ctx, poll, pollArtifact); err != nil {
+			return err
+		}
 		creditEvents, err := service.store.CreditEvents(ctx, poll.PollID)
 		if err != nil {
 			return err
@@ -293,6 +303,30 @@ func (service *Service) Ready(ctx context.Context) error {
 		}
 		if _, err := sequencerstore.ReplayBallot(ballotEvents); err != nil {
 			return err
+		}
+		closedEvent := false
+		for index, event := range ballotEvents {
+			switch event.Type {
+			case "poll_created":
+				var record pollCreatedRecord
+				if index != 0 || protocol.DecodeStrict(event.Artifact, &record) != nil || record.Type != "poll_created" || record.PollHash != poll.ArtifactHash {
+					return &Error{Code: "poll_state_mismatch"}
+				}
+			case "ballot_accepted":
+				if index == 0 || closedEvent {
+					return &Error{Code: "poll_state_mismatch"}
+				}
+			case "poll_closed":
+				if index == 0 || index != len(ballotEvents)-1 || closedEvent {
+					return &Error{Code: "poll_state_mismatch"}
+				}
+				closedEvent = true
+			default:
+				return &Error{Code: "poll_state_mismatch"}
+			}
+		}
+		if len(ballotEvents) == 0 || closedEvent != (poll.State == "closed") || (poll.State == "open" && poll.ClosedAt != "") || (poll.State == "closed" && poll.ClosedAt == "") {
+			return &Error{Code: "poll_state_mismatch"}
 		}
 		claimed, spent, err := service.store.ProjectionCounts(ctx, poll.PollID)
 		if err != nil {
@@ -353,7 +387,48 @@ func (service *Service) Ready(ctx context.Context) error {
 			if err := VerifyAudit(bundle); err != nil {
 				return err
 			}
+			if poll.ClosedAt != bundle.Tally.ClosedAt {
+				return &Error{Code: "poll_state_mismatch"}
+			}
+		} else if _, err := service.store.Tally(ctx, poll.PollID); sequencerstore.ErrorCode(err) != "result_unavailable" {
+			return &Error{Code: "poll_state_mismatch", Err: err}
 		}
+	}
+	return nil
+}
+
+func (service *Service) verifyPollProjection(ctx context.Context, stored sequencerstore.Poll, artifact Poll) error {
+	if artifact.SchemaVersion != SchemaVersion || artifact.Protocol != Protocol || stored.PollID != artifact.PollID || stored.ArtifactHash != hashBytes("vota:poll-artifact:v1", stored.Artifact) || stored.ClosesAt != artifact.ClosesAt || stored.EligibilityCommitment != artifact.EligibilityCommitment {
+		return &Error{Code: "projection_content_mismatch"}
+	}
+	choices, err := service.store.Choices(ctx, stored.PollID)
+	if err != nil || len(choices) != len(artifact.Choices) {
+		return &Error{Code: "projection_content_mismatch", Err: err}
+	}
+	for index, choice := range choices {
+		if choice.Position != index || choice.ChoiceID != artifact.Choices[index].ID || choice.Label != artifact.Choices[index].Label {
+			return &Error{Code: "projection_content_mismatch"}
+		}
+	}
+	credits, err := service.store.Credits(ctx, stored.PollID)
+	if err != nil || len(credits) != artifact.EligibleCount {
+		return &Error{Code: "projection_content_mismatch", Err: err}
+	}
+	encodedKeys := make([]string, len(credits))
+	for index, credit := range credits {
+		key, err := sshsig.ParsePublicKey([]byte(credit.SSHPublicKey))
+		if err != nil {
+			return &Error{Code: "projection_content_mismatch", Err: err}
+		}
+		fingerprint, err := sshsig.Fingerprint(key)
+		if err != nil || fingerprint != credit.SSHFingerprint {
+			return &Error{Code: "projection_content_mismatch", Err: err}
+		}
+		encodedKeys[index] = credit.SSHPublicKey
+	}
+	_, commitment, err := normalizeMembers(encodedKeys)
+	if err != nil || commitment != artifact.EligibilityCommitment {
+		return &Error{Code: "projection_content_mismatch", Err: err}
 	}
 	return nil
 }

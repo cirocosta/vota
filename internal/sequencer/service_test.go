@@ -263,11 +263,55 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 	if _, err := database.ExecContext(ctx, `UPDATE spent_credentials SET credential_hash = ? WHERE poll_id = ? AND ballot_sequence = ?`, receipts[0].CredentialHash, poll.PollID, receipts[0].Sequence); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := database.ExecContext(ctx, `UPDATE poll_credits SET blinded_message_hash = ? WHERE poll_id = ? AND issuance_request_id IS NOT NULL`, "sha256:"+strings.Repeat("e", 64), poll.PollID); err != nil {
+	var creditFingerprint, originalBlindedHash, originalPublicKey string
+	if err := database.QueryRowContext(ctx, `SELECT ssh_fingerprint, blinded_message_hash, ssh_public_key FROM poll_credits WHERE poll_id = ? AND issuance_request_id IS NOT NULL ORDER BY ssh_fingerprint LIMIT 1`, poll.PollID).Scan(&creditFingerprint, &originalBlindedHash, &originalPublicKey); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_credits SET blinded_message_hash = ? WHERE poll_id = ? AND ssh_fingerprint = ?`, "sha256:"+strings.Repeat("e", 64), poll.PollID, creditFingerprint); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.Ready(ctx); ErrorCode(err) != "projection_content_mismatch" {
 		t.Fatalf("credit projection error = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_credits SET blinded_message_hash = ? WHERE poll_id = ? AND ssh_fingerprint = ?`, originalBlindedHash, poll.PollID, creditFingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE polls SET closes_at = ? WHERE poll_id = ?`, now.Add(24*time.Hour).Format(time.RFC3339), poll.PollID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Ready(ctx); ErrorCode(err) != "projection_content_mismatch" {
+		t.Fatalf("close-time projection error = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE polls SET closes_at = ? WHERE poll_id = ?`, poll.ClosesAt, poll.PollID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_choices SET label = ? WHERE poll_id = ? AND position = 0`, "Injected", poll.PollID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Ready(ctx); ErrorCode(err) != "projection_content_mismatch" {
+		t.Fatalf("choice projection error = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_choices SET label = ? WHERE poll_id = ? AND position = 0`, poll.Choices[0].Label, poll.PollID); err != nil {
+		t.Fatal(err)
+	}
+	_, outsider, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_credits SET ssh_public_key = ? WHERE poll_id = ? AND ssh_fingerprint = ?`, canonicalKey(outsider), poll.PollID, creditFingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Ready(ctx); ErrorCode(err) != "projection_content_mismatch" {
+		t.Fatalf("eligibility projection error = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_credits SET ssh_public_key = ? WHERE poll_id = ? AND ssh_fingerprint = ?`, originalPublicKey, poll.PollID, creditFingerprint); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE polls SET state = 'open', closed_at = NULL WHERE poll_id = ?`, poll.PollID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Ready(ctx); ErrorCode(err) != "poll_state_mismatch" {
+		t.Fatalf("reopened poll error = %v", err)
 	}
 }
 
