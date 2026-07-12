@@ -36,6 +36,147 @@ Set `VOTA_PORT` when port 18080 is busy. Set `VOTA_BIN` to reuse a prebuilt
 binary. `VOTA_DEMO_PASSPHRASE` and `VOTA_DEMO_ADMIN_TOKEN` only change
 demo-only secrets.
 
+## When Each Role Uses a Separate Computer
+
+The script puts every role on one computer so it can demonstrate the full
+workflow. That is not how a distributed poll should run. In a real deployment,
+the administrator, each voter, each trustee, and the collector use separate
+machines and keep their own private files and passphrases.
+
+The important rule is: a command either creates a local file, exchanges a file
+with another role, or sends a file to the collector over HTTPS. It never sends a
+private key or a plaintext choice to the collector.
+
+### What Moves Between Computers
+
+| Artifact                                  | Created by                          | Goes to                                              | Never goes to                                     |
+| ----------------------------------------- | ----------------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| `voter.key`                               | voter                               | stays on that voter computer                         | administrator, collector, trustees                |
+| `enrollment.json`                         | voter                               | administrator before freeze                          | other voters' private storage                     |
+| `trustee-N.key` and `trustee-N.final.key` | trustee N                           | stay on trustee N's computer                         | administrator, collector, voters                  |
+| `trustee-N.public.json`                   | trustee N                           | ceremony coordinator and other trustees              | no secrecy requirement                            |
+| `contribution-N.json`                     | trustee N                           | every trustee through a controlled artifact exchange | the public collector API                          |
+| `manifest.json`                           | administrator                       | collector, every voter, trustees, auditors           | no secrecy requirement                            |
+| `ballot.json`                             | voter                               | collector, through `vote submit`                     | administrator and trustees as a hand-carried file |
+| `receipt.json`                            | collector response                  | the submitting voter                                 | no secrecy requirement                            |
+| `aggregate.json`                          | collector response to administrator | every trustee after close                            | no secrecy requirement                            |
+| `trustee-N.share.json`                    | trustee N                           | collector, through `tally submit-share`              | other trustee private storage                     |
+| audit archive                             | collector                           | anyone checking the poll                             | no secrecy requirement                            |
+
+`contribution-N.json` contains a signed public commitment and encrypted
+per-recipient shares. Share it only with the trustees who need it to finalize
+their own keys. Each trustee decrypts only the share addressed to them.
+
+```mermaid
+flowchart LR
+    subgraph AdminMachine["administrator computer"]
+        Draft["poll.draft.json"]
+        Manifest["manifest.json"]
+        Aggregate["aggregate.json"]
+    end
+
+    subgraph VoterMachine["each voter computer"]
+        VoterKey["voter.key private"]
+        Enrollment["enrollment.json"]
+        LocalManifest["manifest.json copy"]
+        Ballot["ballot.json"]
+        Receipt["receipt.json"]
+    end
+
+    subgraph TrusteeMachine["each trustee computer"]
+        TrusteeKey["trustee final key private"]
+        Contribution["contribution-N.json"]
+        TrusteeAggregate["aggregate.json copy"]
+        TrusteeShare["trustee-N.share.json"]
+    end
+
+    Exchange["trustee artifact exchange"]
+    Collector["collector server"]
+    Auditor["auditor computer"]
+
+    VoterKey --> Enrollment --> Draft --> Manifest --> Collector
+    Manifest --> LocalManifest --> Ballot --> Collector
+    Collector --> Receipt
+    TrusteeKey --> Contribution --> Exchange --> TrusteeKey
+    Collector --> Aggregate --> TrusteeAggregate --> TrusteeShare --> Collector
+    Collector --> Auditor
+```
+
+The arrows show artifact flow, not trust. For example, the collector stores a
+ballot but cannot read its selected choice. The administrator receives an
+enrollment proof but cannot use it to cast a ballot as that voter.
+
+### Requests Made by `vota`
+
+Most commands run entirely on the local computer. The commands below are the
+ones that contact the collector. They use canonical JSON over HTTPS. `publish`
+and `close` send the administrator token in an `Authorization: Bearer` header.
+
+| CLI command           | Local input or work                                   | Collector request                       | Response                        |
+| --------------------- | ----------------------------------------------------- | --------------------------------------- | ------------------------------- |
+| `poll publish`        | reads `manifest.json`                                 | `POST /v1/polls`                        | stored manifest                 |
+| `poll get`            | writes a local manifest copy                          | `GET /v1/polls/<poll-id>`               | manifest and poll status        |
+| `vote cast`           | reads manifest and voter key; encrypts choice locally | none                                    | writes `ballot.json`            |
+| `vote submit`         | reads `ballot.json`                                   | `POST /v1/polls/<poll-id>/ballots`      | signed receipt                  |
+| `poll close`          | sends administrator token                             | `POST /v1/polls/<poll-id>/close`        | encrypted aggregate             |
+| `trustee tally-share` | reads manifest, aggregate, and trustee final key      | none                                    | writes trustee share            |
+| `tally submit-share`  | reads trustee share                                   | `POST /v1/polls/<poll-id>/tally-shares` | tally when quorum is reached    |
+| `tally get`           | none                                                  | `GET /v1/polls/<poll-id>/tally`         | signed tally                    |
+| `audit export`        | none                                                  | `GET /v1/polls/<poll-id>/audit`         | compressed public audit archive |
+
+```mermaid
+sequenceDiagram
+    participant Admin as Administrator computer
+    participant Voter as Voter computer
+    participant Collector as Collector server
+    participant Trustee as Trustee computer
+    participant Auditor as Auditor computer
+
+    Admin->>Collector: POST /v1/polls with manifest and admin token
+    Collector-->>Admin: Store the signed manifest
+    Voter->>Collector: GET /v1/polls/poll-id
+    Collector-->>Voter: Return manifest.json
+    Voter->>Voter: vote cast encrypts choice and writes ballot.json
+    Voter->>Collector: POST /v1/polls/poll-id/ballots with ballot.json
+    Collector-->>Voter: Return signed receipt.json
+    Admin->>Collector: POST /v1/polls/poll-id/close with admin token
+    Collector-->>Admin: Return encrypted aggregate.json
+    Admin->>Trustee: Share aggregate.json
+    Trustee->>Trustee: tally-share writes trustee-N.share.json
+    Trustee->>Collector: POST /v1/polls/poll-id/tally-shares with share
+    Auditor->>Collector: GET tally and audit archive
+    Collector-->>Auditor: Return signed tally and public evidence
+```
+
+The collector accepts a ballot or trustee share only after verifying its public
+proofs. Voters and trustees need no collector account because the cryptographic
+artifact, not a login, authorizes those operations.
+
+### A Practical Three-Computer Setup
+
+For a small educational test, use at least five machines or accounts: one
+administrator, three trustees, and one voter machine per voter. A shared
+artifact store can carry public files and trustee contributions. Use a separate
+secure channel for each private key, passphrase, and trustee contribution.
+
+1. Trustees exchange public descriptors and contribution files, then each runs
+   `trustee ceremony finalize` using the complete contribution set.
+1. The administrator creates a draft and gives its draft ID or file to each
+   voter. Each voter returns only `enrollment.json`.
+1. The administrator freezes the manifest, publishes it, and voters download
+   the exact manifest with `poll get` before casting locally.
+1. Each voter submits their own ballot directly to the collector. They do not
+   send `ballot.json` through the administrator.
+1. The administrator closes the poll and gives the returned aggregate to every
+   trustee. Any quorum of trustees submit their own aggregate-only shares.
+1. Anyone downloads the tally and audit archive and runs `audit verify` on
+   their own machine.
+
+The current collector does not provide anonymous transport. Separate computers
+improve key separation, but not network anonymity: the collector can still see
+the submitter's IP address and timing. Use an appropriate anonymity-preserving
+transport if those metadata matter.
+
 ## What You Saw
 
 At the human level, this is a sealed ballot box:

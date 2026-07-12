@@ -3,7 +3,7 @@
 Vota is experimental educational software for anonymous, encrypted polls. It
 is not suitable for real elections or consequential decisions.
 
-## See It Work: A Team Lunch Poll
+## Example: A Team Lunch Poll
 
 Imagine three colleagues choosing lunch. Each person chooses pizza, ramen, or
 salad. The result can say `pizza: 2` and `ramen: 1`, but the published record
