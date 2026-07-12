@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 
 	"github.com/cirocosta/vota/internal/crypto/adapter"
 	"github.com/cirocosta/vota/internal/crypto/election"
@@ -161,8 +160,8 @@ func VerifyBallot(value protocol.Manifest, ballot protocol.BallotEnvelope) error
 	if err := election.VerifyBallot(binding, electionKey, encrypted); err != nil {
 		return &Error{Code: "invalid_validity_proof", Err: err}
 	}
-	nullifier, err := decodeOpaque("ristretto255", ballot.Nullifier)
-	if err != nil || len(nullifier) != 32 {
+	nullifier, err := decodeFixed("ristretto255", ballot.Nullifier, 32)
+	if err != nil {
 		return &Error{Code: "invalid_nullifier", Err: err}
 	}
 	proof, err := decodeOpaque("vota-lsag-v1", ballot.EligibilityProof)
@@ -227,16 +226,16 @@ func artifactContext(value protocol.Manifest, manifestHash string) (election.Bin
 	var binding election.Binding
 	copy(binding.PollID[:], pollID)
 	copy(binding.ManifestHash[:], manifestHashBytes)
-	electionKeyBytes, err := decodeOpaque("ristretto255", value.Trustees.ElectionPublicKey)
-	if err != nil || len(electionKeyBytes) != election.PointSize {
+	electionKeyBytes, err := decodeFixed("ristretto255", value.Trustees.ElectionPublicKey, election.PointSize)
+	if err != nil {
 		return election.Binding{}, election.Point{}, nil, &Error{Code: "invalid_election_key", Err: err}
 	}
 	var electionKey election.Point
 	copy(electionKey[:], electionKeyBytes)
 	ring := make([][]byte, len(value.EligibleKeys))
 	for index, encoded := range value.EligibleKeys {
-		ring[index], err = decodeOpaque("ristretto255", encoded)
-		if err != nil || len(ring[index]) != lrs.PublicKeySize {
+		ring[index], err = decodeFixed("ristretto255", encoded, lrs.PublicKeySize)
+		if err != nil {
 			return election.Binding{}, election.Point{}, nil, &Error{Code: "invalid_eligibility_set", Err: err}
 		}
 	}
@@ -244,21 +243,17 @@ func artifactContext(value protocol.Manifest, manifestHash string) (election.Bin
 }
 
 func decodeHash(value string) ([]byte, error) {
-	decoded, err := decodeOpaque("sha256", value)
-	if err != nil || len(decoded) != 32 {
+	decoded, err := decodeFixed("sha256", value, 32)
+	if err != nil {
 		return nil, fmt.Errorf("invalid sha256 value")
 	}
 	return decoded, nil
 }
 
+func decodeFixed(prefix, value string, size int) ([]byte, error) {
+	return protocol.DecodeFixedHex(prefix, value, size)
+}
+
 func decodeOpaque(prefix, value string) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, prefix+":")
-	if !ok || payload == "" || len(payload)%2 != 0 || payload != strings.ToLower(payload) {
-		return nil, fmt.Errorf("invalid %s value", prefix)
-	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil {
-		return nil, fmt.Errorf("decode %s: %w", prefix, err)
-	}
-	return decoded, nil
+	return protocol.DecodeOpaqueHex(prefix, value)
 }

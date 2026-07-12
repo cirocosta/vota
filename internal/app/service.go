@@ -215,11 +215,11 @@ func (service *Service) Receipt(ctx context.Context, pollID, ballotHash string) 
 }
 
 func validateVotingWindow(value protocol.Manifest, now time.Time) error {
-	opensAt, err := time.Parse(time.RFC3339, value.OpensAt)
+	opensAt, err := protocol.ParseCanonicalTime(value.OpensAt)
 	if err != nil {
 		return &Error{Code: "invalid_poll_window", Err: err}
 	}
-	closesAt, err := time.Parse(time.RFC3339, value.ClosesAt)
+	closesAt, err := protocol.ParseCanonicalTime(value.ClosesAt)
 	if err != nil {
 		return &Error{Code: "invalid_poll_window", Err: err}
 	}

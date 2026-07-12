@@ -231,8 +231,16 @@ func lengthDelimitedDomain(domain string, fields ...[]byte) []byte {
 }
 
 func mustDecode(value, prefix string, size int) []byte {
-	decoded, err := decodeOpaque(prefix, value)
-	if err != nil || (size >= 0 && len(decoded) != size) {
+	var (
+		decoded []byte
+		err     error
+	)
+	if size >= 0 {
+		decoded, err = decodeFixed(prefix, value, size)
+	} else {
+		decoded, err = decodeOpaque(prefix, value)
+	}
+	if err != nil {
 		return nil
 	}
 	return decoded
