@@ -116,10 +116,18 @@ func choices(ctx context.Context, query queryer, pollID string) ([]Choice, error
 }
 
 func (tx *Tx) Credit(ctx context.Context, pollID, fingerprint string) (Credit, error) {
+	return credit(ctx, tx.tx, pollID, fingerprint)
+}
+
+func (store *Store) Credit(ctx context.Context, pollID, fingerprint string) (Credit, error) {
+	return credit(ctx, store.db, pollID, fingerprint)
+}
+
+func credit(ctx context.Context, query queryer, pollID, fingerprint string) (Credit, error) {
 	var value Credit
 	var requestID, blindedHash, claimedAt sql.NullString
 	var signature []byte
-	err := tx.tx.QueryRowContext(ctx, `SELECT poll_id, ssh_fingerprint, ssh_public_key, issuance_request_id, blinded_message_hash, blind_signature, claimed_at FROM poll_credits WHERE poll_id = ? AND ssh_fingerprint = ?`, pollID, fingerprint).Scan(&value.PollID, &value.SSHFingerprint, &value.SSHPublicKey, &requestID, &blindedHash, &signature, &claimedAt)
+	err := query.QueryRowContext(ctx, `SELECT poll_id, ssh_fingerprint, ssh_public_key, issuance_request_id, blinded_message_hash, blind_signature, claimed_at FROM poll_credits WHERE poll_id = ? AND ssh_fingerprint = ?`, pollID, fingerprint).Scan(&value.PollID, &value.SSHFingerprint, &value.SSHPublicKey, &requestID, &blindedHash, &signature, &claimedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Credit{}, &Error{Code: "not_eligible"}
 	}
@@ -180,8 +188,16 @@ func (tx *Tx) BallotEvents(ctx context.Context, pollID string) ([]BallotEvent, e
 }
 
 func (tx *Tx) BallotByCredential(ctx context.Context, pollID, credentialHash string) (BallotEvent, bool, error) {
+	return ballotByCredential(ctx, tx.tx, pollID, credentialHash)
+}
+
+func (store *Store) BallotByCredential(ctx context.Context, pollID, credentialHash string) (BallotEvent, bool, error) {
+	return ballotByCredential(ctx, store.db, pollID, credentialHash)
+}
+
+func ballotByCredential(ctx context.Context, query queryer, pollID, credentialHash string) (BallotEvent, bool, error) {
 	var value BallotEvent
-	err := tx.tx.QueryRowContext(ctx, `
+	err := query.QueryRowContext(ctx, `
 		SELECT event.poll_id, event.sequence, event.event_type, event.previous_hash,
 		       event.event_hash, event.artifact, event.receipt, event.recorded_at
 		FROM spent_credentials AS spent

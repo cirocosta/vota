@@ -6,11 +6,13 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/rsa"
+	"database/sql"
 	"encoding/base64"
 	"net"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -25,7 +27,8 @@ import (
 func TestThreePersonPollEndToEnd(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 12, 12, 0, 0, 0, time.UTC)
-	service, keys := testService(t, now)
+	databasePath := filepath.Join(t.TempDir(), "vota.sqlite")
+	service, keys := testServiceAt(t, now, databasePath)
 	members := canonicalKeys(keys)
 	adminKey := canonicalKey(keys[0])
 	request := CreatePollRequest{
@@ -245,6 +248,27 @@ func TestThreePersonPollEndToEnd(t *testing.T) {
 	if err := VerifyAudit(duplicated); err == nil {
 		t.Fatal("duplicated audit event accepted")
 	}
+
+	database, err := sql.Open("sqlite", databasePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer database.Close()
+	if _, err := database.ExecContext(ctx, `UPDATE spent_credentials SET credential_hash = ? WHERE poll_id = ? AND ballot_sequence = ?`, "sha256:"+strings.Repeat("f", 64), poll.PollID, receipts[0].Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Ready(ctx); ErrorCode(err) != "projection_content_mismatch" {
+		t.Fatalf("spent projection error = %v", err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE spent_credentials SET credential_hash = ? WHERE poll_id = ? AND ballot_sequence = ?`, receipts[0].CredentialHash, poll.PollID, receipts[0].Sequence); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.ExecContext(ctx, `UPDATE poll_credits SET blinded_message_hash = ? WHERE poll_id = ? AND issuance_request_id IS NOT NULL`, "sha256:"+strings.Repeat("e", 64), poll.PollID); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Ready(ctx); ErrorCode(err) != "projection_content_mismatch" {
+		t.Fatalf("credit projection error = %v", err)
+	}
 }
 
 func TestIssuerReplacementCannotClaimExistingPoll(t *testing.T) {
@@ -371,8 +395,12 @@ func TestCreateValidationAndAdminAuthorization(t *testing.T) {
 }
 
 func testService(tb testing.TB, now time.Time) (*Service, []ed25519.PrivateKey) {
+	return testServiceAt(tb, now, ":memory:")
+}
+
+func testServiceAt(tb testing.TB, now time.Time, databasePath string) (*Service, []ed25519.PrivateKey) {
 	tb.Helper()
-	store, err := sequencerstore.Open(context.Background(), ":memory:")
+	store, err := sequencerstore.Open(context.Background(), databasePath)
 	if err != nil {
 		tb.Fatal(err)
 	}

@@ -34,14 +34,19 @@ func (e *Error) Error() string {
 
 func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	parsed, err := url.Parse(baseURL)
-	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+	if err != nil || !isHTTPURL(parsed) {
 		return nil, fmt.Errorf("invalid server URL")
 	}
 	parsed.Path = strings.TrimRight(parsed.Path, "/")
+	parsed.RawPath = ""
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
 	return &Client{baseURL: parsed, http: httpClient}, nil
+}
+
+func isHTTPURL(parsed *url.URL) bool {
+	return parsed != nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != "" && parsed.User == nil && parsed.RawQuery == "" && parsed.Fragment == "" && parsed.Opaque == ""
 }
 
 func (client *Client) doJSON(ctx context.Context, method, path string, input any, _ string, output any) (int, error) {

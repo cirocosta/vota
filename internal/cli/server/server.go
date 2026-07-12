@@ -269,7 +269,7 @@ func validateConfig(config Config) error {
 		}
 	}
 	parsedURL, err := url.Parse(config.PublicBaseURL)
-	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+	if err != nil || (parsedURL.Scheme != "http" && parsedURL.Scheme != "https") || parsedURL.Host == "" || parsedURL.User != nil || parsedURL.RawQuery != "" || parsedURL.Fragment != "" || parsedURL.Opaque != "" {
 		return fmt.Errorf("invalid public_base_url")
 	}
 	for name, value := range map[string]string{"request_timeout": config.RequestTimeout, "shutdown_timeout": config.ShutdownTimeout, "read_header_timeout": config.ReadHeaderTimeout, "read_timeout": config.ReadTimeout, "write_timeout": config.WriteTimeout, "idle_timeout": config.IdleTimeout} {

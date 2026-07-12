@@ -59,6 +59,15 @@ func TestConfigRejectsUnsafeNonLoopback(t *testing.T) {
 	if err := validateConfig(config); err != nil {
 		t.Fatalf("acknowledged config: %v", err)
 	}
+	for _, value := range []string{
+		"ftp://vota.example", "https://user:pass@vota.example",
+		"https://vota.example?token=secret", "https://vota.example#fragment",
+	} {
+		config.PublicBaseURL = value
+		if err := validateConfig(config); err == nil || err.Error() != "invalid public_base_url" {
+			t.Fatalf("public URL %q error = %v", value, err)
+		}
+	}
 }
 
 func TestCheckpointKeyCreatedOwnerOnlyAndReloaded(t *testing.T) {

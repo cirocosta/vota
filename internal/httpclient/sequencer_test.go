@@ -16,8 +16,27 @@ func TestParsePollURL(t *testing.T) {
 	if server != "https://vota.example/team" || pollID != "sha256:abc" {
 		t.Fatalf("server=%q poll=%q", server, pollID)
 	}
-	for _, value := range []string{"not-a-url", "https://vota.example/polls/", "https://vota.example/polls/a/b"} {
+	server, pollID, err = ParsePollURL("https://vota.example/team%20space/polls/sha256:abc")
+	if err != nil || server != "https://vota.example/team%20space" || pollID != "sha256:abc" {
+		t.Fatalf("encoded path: server=%q poll=%q err=%v", server, pollID, err)
+	}
+	for _, value := range []string{
+		"not-a-url", "https://vota.example/polls/", "https://vota.example/polls/a/b",
+		"ftp://vota.example/polls/a", "https://user:pass@vota.example/polls/a",
+		"https://vota.example/polls/a?token=secret", "https://vota.example/polls/a#fragment",
+	} {
 		if _, _, err := ParsePollURL(value); err == nil {
+			t.Fatalf("accepted %q", value)
+		}
+	}
+}
+
+func TestNewRejectsUnsafeServerURLs(t *testing.T) {
+	for _, value := range []string{
+		"ftp://vota.example", "https://user:pass@vota.example",
+		"https://vota.example?token=secret", "https://vota.example#fragment",
+	} {
+		if _, err := New(value, nil); err == nil {
 			t.Fatalf("accepted %q", value)
 		}
 	}
