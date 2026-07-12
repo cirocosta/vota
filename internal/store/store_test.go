@@ -163,6 +163,72 @@ func TestRecordsSurviveRestart(t *testing.T) {
 	}
 }
 
+func TestMemoryStoresAreIsolated(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	first, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("open first: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := first.Close(); err != nil {
+			t.Errorf("close first: %v", err)
+		}
+	})
+	second, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("open second: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := second.Close(); err != nil {
+			t.Errorf("close second: %v", err)
+		}
+	})
+
+	insertTestPoll(t, first)
+	if _, err := second.Poll(ctx, "poll-1"); ErrorCode(err) != "poll_not_found" {
+		t.Fatalf("second store poll error = %v", err)
+	}
+}
+
+func TestMemoryStoreConnectionsShareState(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	store, err := Open(ctx, ":memory:")
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("close: %v", err)
+		}
+	})
+	first, err := store.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("first conn: %v", err)
+	}
+	defer first.Close()
+	second, err := store.db.Conn(ctx)
+	if err != nil {
+		t.Fatalf("second conn: %v", err)
+	}
+	defer second.Close()
+
+	_, err = first.ExecContext(ctx, `INSERT INTO polls(poll_id, manifest_hash, manifest, state, created_at) VALUES ('pool-poll', 'pool-manifest', x'00', 'open', '2026-07-11T12:00:00Z')`)
+	if err != nil {
+		t.Fatalf("insert poll: %v", err)
+	}
+	var count int
+	if err := second.QueryRowContext(ctx, `SELECT COUNT(*) FROM polls WHERE poll_id = 'pool-poll'`).Scan(&count); err != nil {
+		t.Fatalf("count poll: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("poll count = %d, want 1", count)
+	}
+}
+
 func TestConcurrentDuplicateNullifierHasOneWinner(t *testing.T) {
 	ctx := context.Background()
 	store := openTestStore(t)
