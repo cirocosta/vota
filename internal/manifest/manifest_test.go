@@ -112,6 +112,52 @@ func TestEnrollmentProofBindsDraftAndKey(t *testing.T) {
 	}
 }
 
+func TestVerifyEnrollmentRejectsUppercaseHex(t *testing.T) {
+	t.Parallel()
+
+	draft, _ := baseDraft(t)
+	draftID, err := DraftID(draft)
+	if err != nil {
+		t.Fatalf("draft ID: %v", err)
+	}
+	privateKey, _, err := lrs.GenerateKey(newHashReader("uppercase-enrollment-voter"))
+	if err != nil {
+		t.Fatalf("key: %v", err)
+	}
+	enrollment, err := CreateEnrollment(draftID, privateKey, newHashReader("uppercase-enrollment-proof"))
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	tests := []struct {
+		name   string
+		change func(*protocol.Enrollment)
+		code   string
+	}{
+		{"draft id", func(value *protocol.Enrollment) {
+			prefix, payload, _ := strings.Cut(value.PollDraftID, ":")
+			value.PollDraftID = prefix + ":" + strings.ToUpper(payload)
+		}, "invalid_draft_id"},
+		{"eligibility key", func(value *protocol.Enrollment) {
+			prefix, payload, _ := strings.Cut(value.EligibilityKey, ":")
+			value.EligibilityKey = prefix + ":" + strings.ToUpper(payload)
+		}, "invalid_eligibility_key"},
+		{"proof", func(value *protocol.Enrollment) {
+			prefix, payload, _ := strings.Cut(value.Proof, ":")
+			value.Proof = prefix + ":" + strings.ToUpper(payload)
+		}, "invalid_enrollment_proof"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			mutated := enrollment
+			test.change(&mutated)
+			if err := VerifyEnrollment(mutated); ErrorCode(err) != test.code {
+				t.Fatalf("verify error = %v, want %s", err, test.code)
+			}
+		})
+	}
+}
+
 func TestDraftBoundaryTable(t *testing.T) {
 	t.Parallel()
 
