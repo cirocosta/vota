@@ -551,9 +551,12 @@ ballot event, receipt, and CLI completion.
 
 - [x] A valid unspent credential and listed choice returns `201` and a signed
   receipt containing no SSH key or fingerprint.
+- [x] Retrying the same credential and choice returns `200` with the byte-exact
+  stored receipt, including after close; changing the choice returns
+  `409 credential_already_spent`.
 - [x] Concurrent redemption of one serial produces exactly one accepted ballot.
-- [x] Wrong-poll, malformed, forged, expired, and already-spent credentials are
-  rejected with stable error codes.
+- [x] Wrong-poll, malformed, forged, expired, and changed-choice credential
+  submissions are rejected with stable error codes.
 - [x] Successful redemption deletes local credential recovery state only after
   the receipt is durably written.
 

@@ -125,6 +125,9 @@ func resultCommand(options Options) *cobra.Command {
 			if err := sequencer.VerifyPollArtifact(poll); err != nil {
 				return fmt.Errorf("verify poll: %w", err)
 			}
+			if err := sequencer.VerifyTallyForPoll(poll, result); err != nil {
+				return fmt.Errorf("verify result: %w", err)
+			}
 			labels := make(map[string]string, len(poll.Choices))
 			for _, choice := range poll.Choices {
 				labels[choice.ID] = choice.Label
@@ -156,14 +159,24 @@ func closeCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			poll, err := client.SequencerPoll(command.Context(), pollID)
+			if err != nil {
+				return friendlyError(err)
+			}
+			if err := sequencer.VerifyPollArtifact(poll); err != nil {
+				return fmt.Errorf("verify poll: %w", err)
+			}
 			message, _ := sequencer.ClosePollMessage(pollID, adminKey)
 			signature, err := sshsig.Sign(command.Context(), []byte(adminKey), sequencer.AdminNamespace, message)
 			if err != nil {
 				return friendlyError(err)
 			}
-			_, err = client.CloseSequencerPoll(command.Context(), pollID, sequencer.ClosePollRequest{AdminPublicKey: adminKey, SSHSIG: base64.RawURLEncoding.EncodeToString(signature)})
+			tally, err := client.CloseSequencerPoll(command.Context(), pollID, sequencer.ClosePollRequest{AdminPublicKey: adminKey, SSHSIG: base64.RawURLEncoding.EncodeToString(signature)})
 			if err != nil {
 				return friendlyError(err)
+			}
+			if err := sequencer.VerifyTallyForPoll(poll, tally); err != nil {
+				return fmt.Errorf("verify result: %w", err)
 			}
 			_, err = fmt.Fprintln(command.OutOrStdout(), "Poll closed")
 			return err
@@ -231,9 +244,12 @@ func voteCommand(options Options) *cobra.Command {
 				return fmt.Errorf("verify issued credential: %w", err)
 			}
 			ballot := sequencer.BallotRequest{Credential: sequencer.Credential{IssuerKeyID: credential.IssuerKeyID, Serial: base64.RawURLEncoding.EncodeToString(credential.Serial), Signature: base64.RawURLEncoding.EncodeToString(credential.Signature)}, ChoiceID: choiceID}
-			receipt, err := client.VoteWithCredential(command.Context(), pollID, ballot)
+			receipt, _, err := client.VoteWithCredential(command.Context(), pollID, ballot)
 			if err != nil {
 				return friendlyError(err)
+			}
+			if err := sequencer.VerifyReceiptForBallot(poll, ballot, receipt); err != nil {
+				return fmt.Errorf("verify receipt: %w", err)
 			}
 			if receiptPath == "" {
 				receiptPath, err = defaultReceiptPath(options.StateDir, pollID, receipt.CredentialHash)

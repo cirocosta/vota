@@ -179,6 +179,29 @@ func (tx *Tx) BallotEvents(ctx context.Context, pollID string) ([]BallotEvent, e
 	return ballotEvents(ctx, tx.tx, pollID)
 }
 
+func (tx *Tx) BallotByCredential(ctx context.Context, pollID, credentialHash string) (BallotEvent, bool, error) {
+	var value BallotEvent
+	err := tx.tx.QueryRowContext(ctx, `
+		SELECT event.poll_id, event.sequence, event.event_type, event.previous_hash,
+		       event.event_hash, event.artifact, event.receipt, event.recorded_at
+		FROM spent_credentials AS spent
+		JOIN ballot_events AS event
+		  ON event.poll_id = spent.poll_id
+		 AND event.sequence = spent.ballot_sequence
+		WHERE spent.poll_id = ? AND spent.credential_hash = ?
+	`, pollID, credentialHash).Scan(
+		&value.PollID, &value.Sequence, &value.Type, &value.PreviousHash,
+		&value.EventHash, &value.Artifact, &value.Receipt, &value.RecordedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return BallotEvent{}, false, nil
+	}
+	if err != nil {
+		return BallotEvent{}, false, &Error{Code: "event_read_failed", Err: err}
+	}
+	return value, true, nil
+}
+
 func ballotEvents(ctx context.Context, query queryer, pollID string) ([]BallotEvent, error) {
 	rows, err := query.QueryContext(ctx, `SELECT poll_id, sequence, event_type, previous_hash, event_hash, artifact, receipt, recorded_at FROM ballot_events WHERE poll_id = ? ORDER BY sequence`, pollID)
 	if err != nil {

@@ -89,6 +89,7 @@ type Receipt struct {
 	PollID         string     `json:"poll_id"`
 	Sequence       uint64     `json:"sequence"`
 	CredentialHash string     `json:"credential_hash"`
+	ChoiceID       string     `json:"choice_id"`
 	EventHash      string     `json:"event_hash"`
 	Checkpoint     Checkpoint `json:"checkpoint"`
 	Signature      string     `json:"signature"`
