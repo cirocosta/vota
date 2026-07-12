@@ -121,9 +121,15 @@ func ValidateManifest(manifest Manifest) error {
 	if err != nil {
 		return validationError("invalid_opens_at", "opens_at", err.Error())
 	}
+	if opensAt.UTC().Format(time.RFC3339) != manifest.OpensAt {
+		return validationError("invalid_opens_at", "opens_at", "time must be normalized UTC RFC3339")
+	}
 	closesAt, err := time.Parse(time.RFC3339, manifest.ClosesAt)
 	if err != nil {
 		return validationError("invalid_closes_at", "closes_at", err.Error())
+	}
+	if closesAt.UTC().Format(time.RFC3339) != manifest.ClosesAt {
+		return validationError("invalid_closes_at", "closes_at", "time must be normalized UTC RFC3339")
 	}
 	if !opensAt.Before(closesAt) {
 		return validationError("invalid_poll_window", "closes_at", "close time must be after open time")
