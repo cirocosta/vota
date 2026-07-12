@@ -21,5 +21,7 @@ go run ./examples/threshold-tally
 - `threshold-tally` uses Vota's real election package to prove one-hot ballots,
   aggregate ciphertexts, and recover totals with a two-of-three trustee quorum.
 - `legacy-ecc` preserves the earlier X25519 and Monero-inspired exploration.
+- `three-dev-anonymous-poll` is an interactive Bash walkthrough of a complete
+  local three-person poll, from trustee ceremony to offline audit.
 
 Each directory has tests for the invariant printed by its program.
