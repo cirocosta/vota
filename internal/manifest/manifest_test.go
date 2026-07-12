@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha512"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -186,6 +188,38 @@ func TestVerifyRejectsCeremonyMutation(t *testing.T) {
 	manifest.Trustees.ElectionPublicKey = "ristretto255:" + fmt.Sprintf("%064x", 1)
 	if err := Verify(manifest); ErrorCode(err) != "poll_draft_id_mismatch" {
 		t.Fatalf("election key error = %v", err)
+	}
+}
+
+func TestVerifyRejectsUppercaseOpaqueCommitment(t *testing.T) {
+	t.Parallel()
+
+	draft, authorityPrivateKey := completeDraft(t)
+	frozen, err := Freeze(draft, authorityPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value := frozen.Manifest()
+	prefix, payload, ok := strings.Cut(value.Trustees.Members[0].Commitment, ":")
+	if !ok {
+		t.Fatal("commitment missing prefix")
+	}
+	value.Trustees.Members[0].Commitment = prefix + ":" + strings.ToUpper(payload)
+	value.PollDraftID, err = manifestDraftID(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.PollID, err = pollID(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature, err := signManifest(authorityPrivateKey, value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	value.AuthoritySignature = "ed25519sig:" + hex.EncodeToString(signature)
+	if err := Verify(value); ErrorCode(err) != "invalid_trustee_commitment" {
+		t.Fatalf("verify error = %v", err)
 	}
 }
 

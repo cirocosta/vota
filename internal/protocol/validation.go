@@ -221,5 +221,8 @@ func validateOpaque(prefix, value string) error {
 	if _, err := hex.DecodeString(encoded); err != nil {
 		return fmt.Errorf("decode hex: %w", err)
 	}
+	if encoded != strings.ToLower(encoded) {
+		return fmt.Errorf("hex must be lowercase")
+	}
 	return nil
 }
