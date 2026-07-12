@@ -205,11 +205,10 @@ func Verify(manifest protocol.Manifest) error {
 func verifyTrusteeCeremony(set protocol.TrusteeSet) error {
 	contributions := make([]election.PublicContribution, len(set.Members))
 	for index, trustee := range set.Members {
-		payload, ok := strings.CutPrefix(trustee.Commitment, "vota-ceremony-commitment-v1:")
-		if !ok {
+		if _, ok := strings.CutPrefix(trustee.Commitment, "vota-ceremony-commitment-v1:"); !ok {
 			return &Error{Code: "invalid_trustee_commitment"}
 		}
-		encoded, err := hex.DecodeString(payload)
+		encoded, err := protocol.DecodeOpaqueHex("vota-ceremony-commitment-v1", trustee.Commitment)
 		if err != nil {
 			return &Error{Code: "invalid_trustee_commitment", Err: err}
 		}
@@ -414,12 +413,11 @@ func appendField(output, value []byte) []byte {
 }
 
 func decodePrefixed(prefix, value string, length int) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, prefix+":")
-	if !ok {
+	if _, ok := strings.CutPrefix(value, prefix+":"); !ok {
 		return nil, fmt.Errorf("expected %s prefix", prefix)
 	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil || len(decoded) != length || payload != strings.ToLower(payload) {
+	decoded, err := protocol.DecodeFixedHex(prefix, value, length)
+	if err != nil {
 		return nil, fmt.Errorf("expected %d-byte %s value", length, prefix)
 	}
 	return decoded, nil
