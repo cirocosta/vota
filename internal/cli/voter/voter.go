@@ -252,7 +252,7 @@ func newSubmitCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			receipt, _, err := client.SubmitBallot(command.Context(), ballot)
+			receipt, _, err := client.SubmitBallotArtifact(command.Context(), ballot.PollID, encoded)
 			if err != nil {
 				return err
 			}

@@ -401,15 +401,19 @@ func newTallyCommand(options Options) *cobra.Command {
 func newSubmitShareCommand(options Options) *cobra.Command {
 	var sharePath, server string
 	command := &cobra.Command{Use: "submit-share", Short: "submit a verified trustee share", Args: cobra.NoArgs, RunE: func(command *cobra.Command, _ []string) error {
+		encoded, err := os.ReadFile(sharePath)
+		if err != nil {
+			return err
+		}
 		var share protocol.TrusteeShare
-		if err := readStrict(sharePath, &share); err != nil {
+		if err := protocol.DecodeStrict(encoded, &share); err != nil {
 			return err
 		}
 		client, err := options.HTTPClient(server)
 		if err != nil {
 			return err
 		}
-		tally, created, err := client.SubmitTrusteeShare(command.Context(), share)
+		tally, created, err := client.SubmitTrusteeShareArtifact(command.Context(), share.PollID, encoded)
 		if err != nil {
 			return err
 		}

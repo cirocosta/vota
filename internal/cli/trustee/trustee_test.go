@@ -7,8 +7,10 @@ import (
 	"crypto/ed25519"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -19,6 +21,7 @@ import (
 
 	"github.com/cirocosta/vota/internal/app"
 	"github.com/cirocosta/vota/internal/crypto/election"
+	"github.com/cirocosta/vota/internal/httpapi"
 	"github.com/cirocosta/vota/internal/keystore"
 	"github.com/cirocosta/vota/internal/manifest"
 	"github.com/cirocosta/vota/internal/protocol"
@@ -200,6 +203,27 @@ func TestTallyShareCommandAcceptsOnlyValidAggregateRecord(t *testing.T) {
 	}
 	if err := app.VerifyTrusteeShare(value, aggregate, share); err != nil {
 		t.Fatalf("verify tally share: %v", err)
+	}
+
+	prettyShare, err := json.MarshalIndent(share, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prettySharePath := filepath.Join(directory, "pretty-share.json")
+	if err := os.WriteFile(prettySharePath, prettyShare, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	api, err := httpapi.New(httpapi.Config{Service: service})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(api)
+	t.Cleanup(server.Close)
+	submit := commandRoot(options("submit-share"))
+	submit.SetOut(io.Discard)
+	submit.SetArgs([]string{"tally", "submit-share", "--share", prettySharePath, "--server", server.URL})
+	if err := submit.Execute(); err == nil || !strings.Contains(err.Error(), "noncanonical_json") {
+		t.Fatalf("submit share error = %v", err)
 	}
 
 	invalidPath := filepath.Join(directory, "ballot-as-aggregate.json")

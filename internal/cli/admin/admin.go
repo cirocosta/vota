@@ -303,8 +303,12 @@ func newPublishCommand(options Options) *cobra.Command {
 		Short: "publish a frozen manifest",
 		Args:  cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
+			encoded, err := os.ReadFile(manifestPath)
+			if err != nil {
+				return err
+			}
 			var value protocol.Manifest
-			if err := readStrict(manifestPath, &value); err != nil {
+			if err := protocol.DecodeStrict(encoded, &value); err != nil {
 				return err
 			}
 			token, err := options.ReadSecret("Administrator token: ", tokenFD)
@@ -316,7 +320,7 @@ func newPublishCommand(options Options) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			published, created, err := client.PublishPoll(command.Context(), value, strings.TrimSpace(string(token)))
+			published, created, err := client.PublishPollArtifact(command.Context(), encoded, strings.TrimSpace(string(token)))
 			if err != nil {
 				return err
 			}

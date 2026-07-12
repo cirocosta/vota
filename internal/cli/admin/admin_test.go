@@ -2,11 +2,14 @@ package admin
 
 import (
 	"bytes"
+	"context"
 	"crypto/ed25519"
 	"crypto/sha512"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,11 +17,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/cirocosta/vota/internal/app"
 	"github.com/cirocosta/vota/internal/crypto/election"
 	"github.com/cirocosta/vota/internal/crypto/lrs"
+	"github.com/cirocosta/vota/internal/httpapi"
 	"github.com/cirocosta/vota/internal/keystore"
 	"github.com/cirocosta/vota/internal/manifest"
 	"github.com/cirocosta/vota/internal/protocol"
+	"github.com/cirocosta/vota/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -109,10 +115,62 @@ func TestPollHelpIncludesExperimentalWarning(t *testing.T) {
 	}
 }
 
+func TestPublishPreservesManifestFileBytes(t *testing.T) {
+	directory := t.TempDir()
+	manifestPath := filepath.Join(directory, "manifest.json")
+	encoded, err := os.ReadFile(filepath.Join("..", "..", "..", "testdata", "manifest", "canonical.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value protocol.Manifest
+	if err := protocol.DecodeStrict(bytes.TrimSpace(encoded), &value); err != nil {
+		t.Fatal(err)
+	}
+	pretty, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(manifestPath, pretty, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	server := testCollector(t, "admin")
+	options := testOptions(true)
+	options.ReadSecret = func(string, int) ([]byte, error) { return []byte("admin"), nil }
+	command := commandRoot(options)
+	command.SetOut(io.Discard)
+	command.SetArgs([]string{"poll", "publish", "--manifest", manifestPath, "--server", server.URL})
+	if err := command.Execute(); err == nil || !strings.Contains(err.Error(), "noncanonical_manifest") {
+		t.Fatalf("publish error = %v", err)
+	}
+}
+
 func commandRoot(options Options) *cobra.Command {
 	root := &cobra.Command{Use: "vota", SilenceErrors: true, SilenceUsage: true}
 	root.AddCommand(Commands(options)...)
 	return root
+}
+
+func testCollector(tb testing.TB, adminToken string) *httptest.Server {
+	tb.Helper()
+	database, err := store.Open(context.Background(), filepath.Join(tb.TempDir(), "vota.db"))
+	if err != nil {
+		tb.Fatalf("open store: %v", err)
+	}
+	tb.Cleanup(func() { _ = database.Close() })
+	service, err := app.NewService(database, ed25519.NewKeyFromSeed(bytes.Repeat([]byte{0xa1}, ed25519.SeedSize)), app.ServiceOptions{
+		Now: func() time.Time { return time.Date(2026, 8, 1, 13, 0, 0, 0, time.UTC) },
+	})
+	if err != nil {
+		tb.Fatalf("new service: %v", err)
+	}
+	api, err := httpapi.New(httpapi.Config{Service: service, AdminTokenHashes: [][32]byte{httpapi.HashAdminToken(adminToken)}})
+	if err != nil {
+		tb.Fatalf("new API: %v", err)
+	}
+	server := httptest.NewServer(api)
+	tb.Cleanup(server.Close)
+	return server
 }
 
 func testOptions(confirm bool) Options {
