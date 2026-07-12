@@ -593,11 +593,11 @@ func decryptShare(material keyMaterial, dealerID string, encrypted EncryptedShar
 		return nil, err
 	}
 	defer clear(key)
-	nonce, err := hex.DecodeString(encrypted.Nonce)
-	if err != nil || len(nonce) != chacha20poly1305.NonceSizeX {
+	nonce, err := protocol.DecodeRawHex(encrypted.Nonce, chacha20poly1305.NonceSizeX)
+	if err != nil {
 		return nil, fmt.Errorf("invalid_ceremony_ciphertext")
 	}
-	ciphertext, err := hex.DecodeString(encrypted.Ciphertext)
+	ciphertext, err := protocol.DecodeRawHex(encrypted.Ciphertext, -1)
 	if err != nil {
 		return nil, fmt.Errorf("invalid_ceremony_ciphertext")
 	}
@@ -750,15 +750,19 @@ func createFile(path string, data []byte, mode os.FileMode) error {
 }
 
 func decodeValue(value, prefix string, size int) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, prefix+":")
-	if !ok {
+	if _, ok := strings.CutPrefix(value, prefix+":"); !ok {
 		return nil, fmt.Errorf("expected %s value", prefix)
 	}
-	if payload != strings.ToLower(payload) {
-		return nil, fmt.Errorf("invalid %s value", prefix)
+	var (
+		decoded []byte
+		err     error
+	)
+	if size >= 0 {
+		decoded, err = protocol.DecodeFixedHex(prefix, value, size)
+	} else {
+		decoded, err = protocol.DecodeOpaqueHex(prefix, value)
 	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil || (size >= 0 && len(decoded) != size) {
+	if err != nil {
 		return nil, fmt.Errorf("invalid %s value", prefix)
 	}
 	return decoded, nil

@@ -240,9 +240,8 @@ func withDefaults(config Config) Config {
 func adminHashes(values []string) ([][sha256.Size]byte, error) {
 	hashes := make([][sha256.Size]byte, len(values))
 	for index, value := range values {
-		payload, ok := strings.CutPrefix(value, "sha256:")
-		decoded, err := hex.DecodeString(payload)
-		if !ok || err != nil || len(decoded) != sha256.Size {
+		decoded, err := protocol.DecodeFixedHex("sha256", value, sha256.Size)
+		if err != nil {
 			return nil, fmt.Errorf("invalid admin token hash at index %d", index)
 		}
 		copy(hashes[index][:], decoded)
@@ -288,9 +287,8 @@ func loadOrCreateCheckpointKey(path string, random io.Reader) (ed25519.PrivateKe
 	if err := protocol.DecodeStrict(encoded, &material); err != nil {
 		return nil, err
 	}
-	payload, ok := strings.CutPrefix(material.PrivateKey, "ed25519priv:")
-	privateKey, err := hex.DecodeString(payload)
-	if !ok || err != nil || len(privateKey) != ed25519.PrivateKeySize {
+	privateKey, err := protocol.DecodeFixedHex("ed25519priv", material.PrivateKey, ed25519.PrivateKeySize)
+	if err != nil {
 		return nil, fmt.Errorf("invalid checkpoint key")
 	}
 	return ed25519.PrivateKey(privateKey), nil
