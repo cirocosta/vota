@@ -1,74 +1,67 @@
-# Security Model and Limitations
+# Security Model
 
-Vota demonstrates one way to combine poll-local linkable ring proofs,
-one-hot encrypted ballots, threshold decryption, and a signed public history.
-It has no independent security audit and is not suitable for real elections or
-other consequential decisions.
+Vota is for low-consequence anonymous team polls. It is not a general election
+system.
 
-The current design-review gate is recorded in `design-review.md`. No
-security-reviewed release claim is permitted while that gate remains open.
+## Guarantee
 
-## What the implementation verifies
+An eligible SSH key can claim one blind credential per poll. A finalized
+credential can cast one ballot. The credit database stream contains SSH
+fingerprints and blinded issuance transcripts, but no serials or choices. The
+ballot stream contains anonymous credential hashes and choices, but no SSH keys
+or fingerprints.
 
-- The administrator signs an immutable manifest containing choices, the full
-  eligible ring, trustee commitments, thresholds, and the voting window.
-- An enrollment proves possession of one Ristretto255 eligibility scalar and
-  binds its public key to one draft ID.
-- A ballot proves that its encrypted vector contains exactly one selected
-  position and that one member of the manifest ring authorized it.
-- A ballot link tag rejects a conflicting second ballot made with the same
-  eligibility scalar in the ordinary poll-local identity workflow.
-- Trustees prove aggregate decryption shares and sign them with keys committed
-  by the manifest.
-- Offline audit replay verifies every included ballot and trustee proof,
-  object-to-event binding, aggregate, threshold tally, and collector checkpoint.
+Given the blindness of RFC 9474 RSABSSA and an honest protocol execution,
+persisted server records and the public audit log contain no cryptographic join
+from an SSH identity to its ballot.
 
-## Explicit limitations
+## Trust assumption
 
-- Ring membership hides which eligible key signed, not network metadata. The
-  centralized collector can observe IP addresses, timing, and submission size.
-  Vota provides no anonymous transport.
-- Eligibility decisions and real-world identity checks happen out of band. An
-  administrator can omit people, enroll controlled keys, or distribute
-  different draft information before freeze.
-- Per-poll identity files reduce accidental cross-poll reuse. The protocol
-  cannot stop a participant from deliberately enrolling the same eligibility
-  scalar in multiple polls. Such reuse produces the same link tag and links
-  participation.
-- A trustee quorum can decrypt individual ballot ciphertexts by writing tools
-  outside Vota. The supported CLI creates shares only for a closed aggregate;
-  cryptography cannot enforce that policy against colluding key holders.
-- Published totals can reveal a choice in a small or unanimous poll. The
-  privacy threshold suppresses tally publication below a configured ballot
-  count, but it does not provide differential privacy.
-- The collector can censor, delay, or fork views. Signed receipts and
-  checkpoint comparison can expose inconsistent histories when participants
-  compare records; they do not guarantee inclusion or availability.
-- Endpoint compromise, screen capture, swap, terminal recording, malware, or a
-  malicious random source can reveal choices or keys.
-- The cryptographic construction is educational and Vota-specific. It is not
-  wire-compatible with Monero, ElectionGuard, or another voting system.
+The single host is trusted not to correlate issuance and redemption using live
+metadata. Vota does not log IP addresses, raw URLs, poll IDs, SSH material,
+credential material, choices, or request bodies. A reverse proxy must follow
+the same rule.
 
-## Key handling
+A malicious operator with host access can still observe:
 
-Administrator, voter, and trustee key files use Argon2id plus
-XChaCha20-Poly1305 envelopes with role tags and owner-only permissions. Trustee
-ceremony shares use fresh X25519 ephemeral keys, HKDF-SHA-256, and
-XChaCha20-Poly1305 authenticated encryption for each recipient.
+- source IP addresses and TLS fingerprints;
+- request timing and order;
+- process memory before fields are separated;
+- the issuer private key and checkpoint private key;
+- small or predictable voting patterns.
 
-Terminal passphrase, token, and voter choice readers disable echo. File
-descriptor input exists for automation. The CLI defines no passphrase, token,
-private-key, or choice value flags.
+Blind credentials do not prevent those observations. Run the server only with
+an operator the team trusts under this model.
 
-The collector checkpoint key is different: the process must unlock it without
-an interactive passphrase, so Vota stores it as a strict owner-only file. Host
-access exposes that key and permits forged future checkpoints, receipts, and
-tally signatures.
+## Protected properties
 
-## Supported assurance
+- Only configured SSH administrators can create or close polls.
+- Only allowlisted Ed25519 SSH keys can claim credits.
+- Claim retries are idempotent only for the same request ID and blinded value.
+- Concurrent claims for one SSH key commit at most one issuance.
+- Credentials bind their poll, issuer key, random serial, and protocol domain.
+- Concurrent redemption of one credential commits at most one ballot.
+- Open polls expose neither individual ballots nor partial totals.
+- Signed hash-chain checkpoints reveal modification of published ballot logs.
+- Offline replay recomputes the final tally and validates receipt inclusion.
 
-Committed deterministic vectors cover ring proofs, election proofs, manifests,
-audit records, and receipts. Tests mutate proofs and artifacts, fuzz binary
-parsers and verifiers, exercise concurrent uniqueness constraints, run a live
-subprocess election, and replay its public record offline. These are regression
-controls, not a security proof or external review.
+## Not protected
+
+- Server censorship before a receipt is issued.
+- A malicious issuer minting extra credentials.
+- A sequencer showing different signed histories to people who never compare
+  checkpoints.
+- Compromise of a participant computer or `ssh-agent`.
+- Theft of unfinished local recovery state or an unspent bearer credential.
+- Inference from a small, unanimous, or predictable result.
+- Post-quantum attackers.
+
+## Key material
+
+The issuer RSA key and checkpoint Ed25519 key are created with mode `0600`.
+They have separate roles and must be backed up together with the SQLite
+database. The administrator file contains public SSH keys and can be mode
+`0644`.
+
+Version 1 accepts `ssh-ed25519` keys only. RSA, ECDSA, DSA, SSH certificates,
+and FIDO-backed SSH keys are rejected.

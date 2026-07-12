@@ -2,8 +2,9 @@ package e2e
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"fmt"
 	"net"
 	"net/http"
@@ -11,279 +12,260 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"slices"
 	"strings"
+	"sync"
+	"syscall"
 	"testing"
 	"time"
 
-	"github.com/cirocosta/vota/internal/auditverify"
-	"github.com/cirocosta/vota/internal/cli/admin"
-	serverconfig "github.com/cirocosta/vota/internal/cli/server"
-	"github.com/cirocosta/vota/internal/cli/trustee"
-	"github.com/cirocosta/vota/internal/manifest"
-	"github.com/cirocosta/vota/internal/protocol"
+	"golang.org/x/crypto/ssh"
+	"golang.org/x/crypto/ssh/agent"
 )
 
-const testPassphrase = "e2e-passphrase"
-
-func TestAnonymousPollWorkflow(t *testing.T) {
-	if testing.Short() {
-		t.Skip("subprocess workflow")
+func TestSSHCreditTeamWorkflow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix ssh-agent socket required")
 	}
-	repository := repositoryRoot(t)
 	directory := t.TempDir()
 	binary := filepath.Join(directory, "vota")
-	build := exec.Command("go", "build", "-o", binary, "./cmd/vota")
-	build.Dir = repository
+	build := exec.Command("go", "build", "-o", binary, "../../cmd/vota")
 	if output, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, output)
 	}
 
-	participants := make([]trustee.Participant, 3)
-	trusteeKeys := make([]string, 3)
-	for index := range 3 {
-		trusteeKeys[index] = filepath.Join(directory, fmt.Sprintf("trustee-%d.key", index+1))
-		publicPath := filepath.Join(directory, fmt.Sprintf("trustee-%d.public.json", index+1))
-		run(t, binary, "", testPassphrase, "trustee", "key", "create", "--id", fmt.Sprintf("trustee-%d", index+1), "--out", trusteeKeys[index], "--public-out", publicPath, "--passphrase-fd", "3")
-		readJSON(t, publicPath, &participants[index])
-	}
-	slices.SortFunc(participants, func(a, b trustee.Participant) int { return strings.Compare(a.ID, b.ID) })
-	ceremonyConfig := trustee.CeremonyConfig{SchemaVersion: protocol.SchemaVersion, Protocol: protocol.ProtocolVersion, Quorum: 2, Trustees: participants}
-	ceremonyConfigPath := filepath.Join(directory, "ceremony.config.json")
-	ceremonyRequestPath := filepath.Join(directory, "ceremony.request.json")
-	writeJSON(t, ceremonyConfigPath, ceremonyConfig)
-	run(t, binary, "", "", "trustee", "ceremony", "init", "--config", ceremonyConfigPath, "--out", ceremonyRequestPath)
-	contributionDirectory := filepath.Join(directory, "contributions")
-	if err := os.Mkdir(contributionDirectory, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	for index := range 3 {
-		run(t, binary, "", testPassphrase, "trustee", "ceremony", "contribute", "--input", ceremonyRequestPath, "--key", trusteeKeys[index], "--out", filepath.Join(contributionDirectory, fmt.Sprintf("trustee-%d.json", index+1)), "--passphrase-fd", "3")
-	}
-	finalTrusteeKeys := make([]string, 3)
-	var publicCeremony trustee.PublicCeremony
-	for index := range 3 {
-		finalTrusteeKeys[index] = filepath.Join(directory, fmt.Sprintf("trustee-%d.final.key", index+1))
-		publicPath := filepath.Join(directory, fmt.Sprintf("ceremony-%d.public.json", index+1))
-		run(t, binary, "", testPassphrase, "trustee", "ceremony", "finalize", "--input-dir", contributionDirectory, "--request", ceremonyRequestPath, "--key", trusteeKeys[index], "--out", finalTrusteeKeys[index], "--public-out", publicPath, "--passphrase-fd", "3")
-		if index == 0 {
-			readJSON(t, publicPath, &publicCeremony)
-		}
-	}
-
-	adminKey := filepath.Join(directory, "admin.key")
-	run(t, binary, "", testPassphrase, "admin", "key", "create", "--out", adminKey, "--passphrase-fd", "3")
-	trustees := make([]admin.TrusteeConfig, len(publicCeremony.Trustees))
-	for index, member := range publicCeremony.Trustees {
-		trustees[index] = admin.TrusteeConfig{ID: member.ID, SigningKey: member.SigningKey, Commitment: member.Commitment}
-	}
-	now := time.Now().UTC().Truncate(time.Second)
-	pollConfig := admin.PollConfig{
-		Question: "Which option?",
-		Choices:  []protocol.Choice{{ID: "a", Label: "Alpha"}, {ID: "b", Label: "Beta"}, {ID: "c", Label: "Gamma"}},
-		Trustees: trustees, TrusteeQuorum: 2, PrivacyThreshold: 3,
-		OpensAt: now.Add(-time.Hour).Format(time.RFC3339), ClosesAt: now.Add(time.Hour).Format(time.RFC3339),
-	}
-	pollConfigPath := filepath.Join(directory, "poll.config.json")
-	draftPath := filepath.Join(directory, "poll.draft.json")
-	writeJSON(t, pollConfigPath, pollConfig)
-	run(t, binary, "", testPassphrase, "poll", "create", "--config", pollConfigPath, "--admin-key", adminKey, "--out", draftPath, "--passphrase-fd", "3")
-
-	identityPaths := make([]string, 5)
-	for index := range 5 {
-		identityPaths[index] = filepath.Join(directory, fmt.Sprintf("voter-%d.key", index+1))
-		enrollmentPath := filepath.Join(directory, fmt.Sprintf("voter-%d.enrollment.json", index+1))
-		run(t, binary, "", testPassphrase, "identity", "create", "--poll", draftPath, "--out", identityPaths[index], "--passphrase-fd", "3")
-		run(t, binary, "", testPassphrase, "identity", "enroll", "export", "--identity", identityPaths[index], "--out", enrollmentPath, "--passphrase-fd", "3")
-		run(t, binary, "", "", "poll", "eligible", "add", "--draft", draftPath, "--enrollment", enrollmentPath)
-	}
-	manifestPath := filepath.Join(directory, "manifest.json")
-	run(t, binary, "", testPassphrase, "poll", "freeze", "--yes", "--draft", draftPath, "--admin-key", adminKey, "--out", manifestPath, "--passphrase-fd", "3")
-	manifestBytes, err := os.ReadFile(manifestPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	frozen, err := manifest.Parse(manifestBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	poll := frozen.Manifest()
-
-	address := freeAddress(t)
-	adminToken := "e2e-admin-token"
-	tokenHash := sha256.Sum256([]byte(adminToken))
-	collectorConfig := serverconfig.Config{
-		ListenAddress: address, DatabasePath: filepath.Join(directory, "vota.sqlite"),
-		PublicBaseURL: "http://" + address, AdminTokenHashes: []string{"sha256:" + hex.EncodeToString(tokenHash[:])},
-		CheckpointKeyPath: filepath.Join(directory, "checkpoint.key"), ShutdownTimeout: "2s",
-	}
-	collectorConfigPath := filepath.Join(directory, "server.json")
-	writeJSON(t, collectorConfigPath, collectorConfig)
-	serverLogPath := filepath.Join(directory, "server.log")
-	serverLog, err := os.Create(serverLogPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	server := exec.Command(binary, "serve", "--config", collectorConfigPath)
-	server.Stdout = serverLog
-	server.Stderr = serverLog
-	if err := server.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if server.Process != nil {
-			_ = server.Process.Signal(os.Interrupt)
-			_, _ = server.Process.Wait()
-		}
-		_ = serverLog.Close()
-	})
-	waitHealthy(t, "http://"+address)
-	baseURL := "http://" + address
-	run(t, binary, "", adminToken, "poll", "publish", "--manifest", manifestPath, "--server", baseURL, "--admin-token-fd", "3")
-
-	ballotPaths := make([]string, 3)
-	for index, choice := range []string{"a", "b", "a"} {
-		ballotPaths[index] = filepath.Join(directory, fmt.Sprintf("ballot-%d.json", index+1))
-		castOutput := run(t, binary, choice+"\n", testPassphrase, "vote", "cast", "--choice-stdin", "--poll", manifestPath, "--identity", identityPaths[index], "--out", ballotPaths[index], "--passphrase-fd", "3")
-		for _, label := range []string{"Alpha", "Beta", "Gamma"} {
-			if strings.Contains(castOutput, label) {
-				t.Fatalf("cast output disclosed choice label %q: %s", label, castOutput)
-			}
-		}
-		receiptPath := filepath.Join(directory, fmt.Sprintf("receipt-%d.json", index+1))
-		run(t, binary, "", "", "vote", "submit", "--ballot", ballotPaths[index], "--server", baseURL, "--receipt", receiptPath)
-	}
-
-	doubleBallot := filepath.Join(directory, "double-vote.json")
-	run(t, binary, "c\n", testPassphrase, "vote", "cast", "--choice-stdin", "--poll", manifestPath, "--identity", identityPaths[0], "--out", doubleBallot, "--passphrase-fd", "3")
-	if output, err := runError(binary, "", "", "vote", "submit", "--ballot", doubleBallot, "--server", baseURL, "--receipt", filepath.Join(directory, "double.receipt.json")); err == nil || !strings.Contains(output, "double_vote") {
-		t.Fatalf("double vote output = %q, error = %v", output, err)
-	}
-	ineligibleIdentity := filepath.Join(directory, "ineligible.key")
-	run(t, binary, "", testPassphrase, "identity", "create", "--poll", poll.PollDraftID, "--out", ineligibleIdentity, "--passphrase-fd", "3")
-	if output, err := runError(binary, "a\n", testPassphrase, "vote", "cast", "--choice-stdin", "--poll", manifestPath, "--identity", ineligibleIdentity, "--out", filepath.Join(directory, "ineligible-ballot.json"), "--passphrase-fd", "3"); err == nil || !strings.Contains(output, "identity_not_eligible") {
-		t.Fatalf("ineligible output = %q, error = %v", output, err)
-	}
-
-	aggregateOutput := run(t, binary, "", adminToken, "poll", "close", "--poll", poll.PollID, "--server", baseURL, "--admin-token-fd", "3", "--json")
-	aggregatePath := filepath.Join(directory, "aggregate.json")
-	if err := os.WriteFile(aggregatePath, []byte(strings.TrimSpace(aggregateOutput)), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	for index := range 2 {
-		sharePath := filepath.Join(directory, fmt.Sprintf("share-%d.json", index+1))
-		run(t, binary, "", testPassphrase, "trustee", "tally-share", "--poll", manifestPath, "--aggregate", aggregatePath, "--key", finalTrusteeKeys[index], "--out", sharePath, "--passphrase-fd", "3")
-		run(t, binary, "", "", "tally", "submit-share", "--share", sharePath, "--server", baseURL)
-	}
-	tallyPath := filepath.Join(directory, "tally.json")
-	run(t, binary, "", "", "tally", "get", "--poll", poll.PollID, "--server", baseURL, "--out", tallyPath)
-	var tally protocol.Tally
-	readJSON(t, tallyPath, &tally)
-	if len(tally.Totals) != 3 || tally.Totals[0].Total != 2 || tally.Totals[1].Total != 1 || tally.Totals[2].Total != 0 {
-		t.Fatalf("tally totals = %+v", tally.Totals)
-	}
-
-	recordDirectory := filepath.Join(directory, "audit-record")
-	run(t, binary, "", "", "audit", "export", "--poll", poll.PollID, "--server", baseURL, "--out", recordDirectory)
-	verificationOutput := run(t, binary, "", "", "audit", "verify", "--record", recordDirectory, "--json")
-	var report auditverify.Report
-	if err := protocol.DecodeStrict([]byte(verificationOutput), &report); err != nil {
-		t.Fatalf("decode audit report: %v\n%s", err, verificationOutput)
-	}
-	if report.PollID != poll.PollID || report.AcceptedBallotCount != 3 || len(report.ValidTrusteeIDs) != 2 {
-		t.Fatalf("audit report = %+v", report)
-	}
-
-	for _, path := range append(ballotPaths, filepath.Join(recordDirectory, "record.json")) {
-		encoded, err := os.ReadFile(path)
-		if err != nil {
+	privateKeys := make([]ed25519.PrivateKey, 3)
+	publicKeys := make([]string, 3)
+	identityPaths := make([]string, 3)
+	for index := range privateKeys {
+		_, privateKeys[index], _ = ed25519.GenerateKey(rand.Reader)
+		public, _ := ssh.NewPublicKey(privateKeys[index].Public())
+		publicKeys[index] = string(bytes.TrimSpace(ssh.MarshalAuthorizedKey(public)))
+		identityPaths[index] = filepath.Join(directory, fmt.Sprintf("developer-%d.pub", index+1))
+		if err := os.WriteFile(identityPaths[index], append([]byte(publicKeys[index]), '\n'), 0o644); err != nil {
 			t.Fatal(err)
 		}
-		for _, forbidden := range []string{"private_key", "passphrase", "selected_choice"} {
-			if bytes.Contains(encoded, []byte(forbidden)) {
-				t.Fatalf("public artifact %s contains %q", path, forbidden)
+	}
+	agentSocket := serveAgent(t, privateKeys)
+	teamPath := filepath.Join(directory, "team.keys")
+	teamFile := fmt.Sprintf("alice %s\nbob %s\ncarol %s\n", publicKeys[0], publicKeys[1], publicKeys[2])
+	if err := os.WriteFile(teamPath, []byte(teamFile), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	adminPath := filepath.Join(directory, "admin.keys")
+	if err := os.WriteFile(adminPath, append([]byte(publicKeys[0]), '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	address := freeAddress(t)
+	configPath := filepath.Join(directory, "server.json")
+	databasePath := filepath.Join(directory, "vota.sqlite")
+	checkpointPath := filepath.Join(directory, "checkpoint.key")
+	issuerPath := filepath.Join(directory, "issuer.key")
+	writeConfig(t, configPath, address, databasePath, checkpointPath, issuerPath, adminPath)
+	server := startServer(t, binary, configPath, address)
+	stateDir := filepath.Join(directory, "state")
+	environment := append(os.Environ(), "SSH_AUTH_SOCK="+agentSocket, "XDG_STATE_HOME="+stateDir)
+
+	closesAt := time.Now().UTC().Add(time.Hour).Truncate(time.Second).Format(time.RFC3339)
+	stdout, _ := run(t, binary, environment, "", "poll", "create",
+		"--server", "http://"+address,
+		"--admin-identity", identityPaths[0],
+		"--members", teamPath,
+		"--question", "Where should we have lunch?",
+		"--choice", "Pizza", "--choice", "Ramen", "--choice", "Salad",
+		"--closes-at", closesAt,
+	)
+	pollURL := strings.TrimSpace(stdout)
+	if !strings.HasPrefix(pollURL, "http://"+address+"/polls/sha256:") {
+		t.Fatalf("poll URL = %q", pollURL)
+	}
+	pollID := strings.TrimPrefix(pollURL, "http://"+address+"/polls/")
+
+	for index := range privateKeys {
+		receipt := filepath.Join(directory, fmt.Sprintf("receipt-%d.json", index+1))
+		stdout, _ := run(t, binary, environment, fmt.Sprintf("%d\n", index+1), "vote", pollURL, "--identity", identityPaths[index], "--choice-stdin", "--receipt-out", receipt)
+		if !strings.Contains(stdout, "Vote recorded") {
+			t.Fatalf("vote output = %s", stdout)
+		}
+		if info, err := os.Stat(receipt); err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("receipt %d: info=%v err=%v", index, info, err)
+		}
+	}
+
+	_, stderr := runExpectError(t, binary, environment, "1\n", "vote", pollURL, "--identity", identityPaths[0], "--choice-stdin")
+	if !strings.Contains(stderr, "credit already claimed") {
+		t.Fatalf("duplicate claim error = %s", stderr)
+	}
+
+	run(t, binary, environment, "", "poll", "close", pollURL, "--admin-identity", identityPaths[0])
+	result, _ := run(t, binary, environment, "", "poll", "result", pollURL)
+	for _, expected := range []string{"Pizza: 1", "Ramen: 1", "Salad: 1", "Total votes: 3"} {
+		if !strings.Contains(result, expected) {
+			t.Fatalf("result omits %q:\n%s", expected, result)
+		}
+	}
+	auditDirectory := filepath.Join(directory, "audit")
+	run(t, binary, environment, "", "audit", "export", "--poll", pollID, "--server", "http://"+address, "--out", auditDirectory)
+	verified, _ := run(t, binary, environment, "", "audit", "verify", "--record", auditDirectory)
+	if !strings.Contains(verified, "Audit verified") {
+		t.Fatalf("audit output = %s", verified)
+	}
+
+	logs := stopServer(t, server)
+	for _, prohibited := range []string{pollID, publicKeys[0], "Pizza", "Ramen", "Salad"} {
+		if strings.Contains(logs, prohibited) {
+			t.Fatalf("server logs contain prohibited value %q: %s", prohibited, logs)
+		}
+	}
+
+	server = startServer(t, binary, configPath, address)
+	result, _ = run(t, binary, environment, "", "poll", "result", pollURL)
+	if !strings.Contains(result, "Total votes: 3") {
+		t.Fatalf("restart lost result: %s", result)
+	}
+	_ = stopServer(t, server)
+
+	restoreDirectory := filepath.Join(directory, "restore")
+	if err := os.MkdirAll(restoreDirectory, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	restoredDatabase := copyFile(t, databasePath, filepath.Join(restoreDirectory, "vota.sqlite"), 0o600)
+	restoredCheckpoint := copyFile(t, checkpointPath, filepath.Join(restoreDirectory, "checkpoint.key"), 0o600)
+	restoredIssuer := copyFile(t, issuerPath, filepath.Join(restoreDirectory, "issuer.key"), 0o600)
+	restoredAdmin := copyFile(t, adminPath, filepath.Join(restoreDirectory, "admin.keys"), 0o644)
+	restoredConfig := filepath.Join(restoreDirectory, "server.json")
+	writeConfig(t, restoredConfig, address, restoredDatabase, restoredCheckpoint, restoredIssuer, restoredAdmin)
+	server = startServer(t, binary, restoredConfig, address)
+	result, _ = run(t, binary, environment, "", "poll", "result", pollURL)
+	if !strings.Contains(result, "Total votes: 3") {
+		t.Fatalf("restore lost result: %s", result)
+	}
+	_ = stopServer(t, server)
+}
+
+type runningServer struct {
+	command *exec.Cmd
+	logs    bytes.Buffer
+}
+
+func startServer(tb testing.TB, binary, configPath, address string) *runningServer {
+	tb.Helper()
+	server := &runningServer{}
+	server.command = exec.Command(binary, "serve", "--config", configPath)
+	server.command.Stdout = &server.logs
+	server.command.Stderr = &server.logs
+	if err := server.command.Start(); err != nil {
+		tb.Fatal(err)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		response, err := http.Get("http://" + address + "/readyz")
+		if err == nil {
+			_ = response.Body.Close()
+			if response.StatusCode == http.StatusOK {
+				return server
 			}
 		}
-	}
-
-	if err := server.Process.Signal(os.Interrupt); err != nil {
-		t.Fatal(err)
-	}
-	if err := server.Wait(); err != nil {
-		t.Fatalf("server shutdown: %v", err)
-	}
-	_ = serverLog.Close()
-	server.Process = nil
-	logs, err := os.ReadFile(serverLogPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, prohibited := range []string{adminToken, testPassphrase, "nullifier", "ballot_hash"} {
-		if bytes.Contains(logs, []byte(prohibited)) {
-			t.Fatalf("server logs contain %q", prohibited)
+		if time.Now().After(deadline) {
+			_ = server.command.Process.Kill()
+			_ = server.command.Wait()
+			tb.Fatalf("server did not become ready: %s", server.logs.String())
 		}
+		time.Sleep(20 * time.Millisecond)
 	}
 }
 
-func run(tb testing.TB, binary, stdin, secret string, arguments ...string) string {
+func stopServer(tb testing.TB, server *runningServer) string {
 	tb.Helper()
-	output, err := runError(binary, stdin, secret, arguments...)
-	if err != nil {
-		tb.Fatalf("vota %s: %v\n%s", strings.Join(arguments, " "), err, output)
+	if err := server.command.Process.Signal(syscall.SIGTERM); err != nil {
+		tb.Fatal(err)
 	}
-	return output
+	done := make(chan error, 1)
+	go func() { done <- server.command.Wait() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			tb.Fatalf("server stop: %v\n%s", err, server.logs.String())
+		}
+	case <-time.After(10 * time.Second):
+		_ = server.command.Process.Kill()
+		tb.Fatal("server did not stop")
+	}
+	return server.logs.String()
 }
 
-func runError(binary, stdin, secret string, arguments ...string) (string, error) {
-	command := exec.Command(binary, arguments...)
+func run(tb testing.TB, binary string, environment []string, stdin string, args ...string) (string, string) {
+	tb.Helper()
+	stdout, stderr, err := execute(binary, environment, stdin, args...)
+	if err != nil {
+		tb.Fatalf("vota %s: %v\nstdout:\n%s\nstderr:\n%s", strings.Join(args, " "), err, stdout, stderr)
+	}
+	return stdout, stderr
+}
+
+func runExpectError(tb testing.TB, binary string, environment []string, stdin string, args ...string) (string, string) {
+	tb.Helper()
+	stdout, stderr, err := execute(binary, environment, stdin, args...)
+	if err == nil {
+		tb.Fatalf("vota %s unexpectedly succeeded", strings.Join(args, " "))
+	}
+	return stdout, stderr
+}
+
+func execute(binary string, environment []string, stdin string, args ...string) (string, string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, args...)
+	command.Env = environment
 	command.Stdin = strings.NewReader(stdin)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr
-	var secretFile *os.File
-	if secret != "" {
-		var err error
-		secretFile, err = os.CreateTemp("", "vota-e2e-secret-*")
-		if err != nil {
-			return "", err
-		}
-		defer os.Remove(secretFile.Name())
-		defer secretFile.Close()
-		if _, err := secretFile.WriteString(secret + "\n"); err != nil {
-			return "", err
-		}
-		if _, err := secretFile.Seek(0, 0); err != nil {
-			return "", err
-		}
-		command.ExtraFiles = []*os.File{secretFile}
-	}
 	err := command.Run()
-	if err != nil {
-		return stdout.String() + stderr.String(), err
-	}
-	return stdout.String(), nil
+	return stdout.String(), stderr.String(), err
 }
 
-func writeJSON(tb testing.TB, path string, value any) {
+func serveAgent(tb testing.TB, keys []ed25519.PrivateKey) string {
 	tb.Helper()
-	encoded, err := protocol.MarshalCanonical(value)
+	directory, err := os.MkdirTemp("", "vota-e2e-agent-")
 	if err != nil {
 		tb.Fatal(err)
 	}
-	if err := os.WriteFile(path, encoded, 0o644); err != nil {
-		tb.Fatal(err)
-	}
-}
-
-func readJSON(tb testing.TB, path string, target any) {
-	tb.Helper()
-	encoded, err := os.ReadFile(path)
+	path := filepath.Join(directory, "agent.sock")
+	listener, err := net.Listen("unix", path)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	if err := protocol.DecodeStrict(encoded, target); err != nil {
-		tb.Fatal(err)
+	keyring := agent.NewKeyring()
+	for _, key := range keys {
+		if err := keyring.Add(agent.AddedKey{PrivateKey: key}); err != nil {
+			tb.Fatal(err)
+		}
 	}
+	done := make(chan struct{})
+	var connections sync.WaitGroup
+	go func() {
+		defer close(done)
+		for {
+			connection, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			connections.Add(1)
+			go func() {
+				defer connections.Done()
+				defer connection.Close()
+				_ = agent.ServeAgent(keyring, connection)
+			}()
+		}
+	}()
+	tb.Cleanup(func() {
+		_ = listener.Close()
+		<-done
+		connections.Wait()
+		_ = os.RemoveAll(directory)
+	})
+	return path
 }
 
 func freeAddress(tb testing.TB) string {
@@ -297,27 +279,22 @@ func freeAddress(tb testing.TB) string {
 	return address
 }
 
-func waitHealthy(tb testing.TB, baseURL string) {
+func writeConfig(tb testing.TB, path, address, database, checkpoint, issuer, admins string) {
 	tb.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		response, err := http.Get(baseURL + "/healthz")
-		if err == nil {
-			_ = response.Body.Close()
-			if response.StatusCode == http.StatusOK {
-				return
-			}
-		}
-		time.Sleep(10 * time.Millisecond)
+	body := fmt.Sprintf(`{"listen_address":%q,"database_path":%q,"public_base_url":%q,"checkpoint_key_path":%q,"issuer_key_path":%q,"admin_keys_path":%q,"shutdown_timeout":"2s"}`, address, database, "http://"+address, checkpoint, issuer, admins)
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		tb.Fatal(err)
 	}
-	tb.Fatal("collector did not become healthy")
 }
 
-func repositoryRoot(tb testing.TB) string {
+func copyFile(tb testing.TB, source, target string, mode os.FileMode) string {
 	tb.Helper()
-	_, filename, _, ok := runtime.Caller(0)
-	if !ok {
-		tb.Fatal("resolve source path")
+	data, err := os.ReadFile(source)
+	if err != nil {
+		tb.Fatal(err)
 	}
-	return filepath.Clean(filepath.Join(filepath.Dir(filename), "..", ".."))
+	if err := os.WriteFile(target, data, mode); err != nil {
+		tb.Fatal(err)
+	}
+	return target
 }

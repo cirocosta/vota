@@ -1,9 +1,8 @@
+// Package protocol provides strict canonical JSON helpers for Vota artifacts.
 package protocol
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,7 +10,25 @@ import (
 	"github.com/gowebpki/jcs"
 )
 
-// MarshalCanonical returns RFC 8785 canonical JSON.
+const MaxArtifactBytes = 32 << 20
+
+type ValidationError struct {
+	Code    string
+	Field   string
+	Message string
+}
+
+func (e *ValidationError) Error() string {
+	if e.Field == "" {
+		return e.Code + ": " + e.Message
+	}
+	return e.Code + ": " + e.Field + ": " + e.Message
+}
+
+func validationError(code, field, message string) error {
+	return &ValidationError{Code: code, Field: field, Message: message}
+}
+
 func MarshalCanonical(value any) ([]byte, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -24,28 +41,10 @@ func MarshalCanonical(value any) ([]byte, error) {
 	return canonical, nil
 }
 
-// HashCanonical hashes a domain separator, a zero byte, and canonical JSON.
-func HashCanonical(domain string, value any) (string, error) {
-	if err := ValidateDomain(domain); err != nil {
-		return "", err
-	}
-	canonical, err := MarshalCanonical(value)
-	if err != nil {
-		return "", err
-	}
-	hash := sha256.New()
-	_, _ = hash.Write([]byte(domain))
-	_, _ = hash.Write([]byte{0})
-	_, _ = hash.Write(canonical)
-	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
-}
-
-// DecodeStrict rejects duplicate fields, unknown fields, trailing values, and oversized artifacts.
 func DecodeStrict(data []byte, target any) error {
 	return DecodeStrictLimit(data, target, MaxArtifactBytes)
 }
 
-// DecodeStrictLimit applies strict decoding with an explicit transport limit.
 func DecodeStrictLimit(data []byte, target any, maxBytes int) error {
 	if maxBytes <= 0 || len(data) > maxBytes {
 		return validationError("artifact_too_large", "artifact", fmt.Sprintf("artifact exceeds %d bytes", maxBytes))
@@ -58,10 +57,7 @@ func DecodeStrictLimit(data []byte, target any, maxBytes int) error {
 	if err := decoder.Decode(target); err != nil {
 		return validationError("invalid_json", "artifact", err.Error())
 	}
-	if err := ensureJSONEOF(decoder); err != nil {
-		return err
-	}
-	return nil
+	return ensureJSONEOF(decoder)
 }
 
 func ensureJSONEOF(decoder *json.Decoder) error {
@@ -97,7 +93,6 @@ func walkJSONValue(decoder *json.Decoder, path string, first json.Token) error {
 	if !ok {
 		return nil
 	}
-
 	switch delim {
 	case '{':
 		seen := make(map[string]struct{})

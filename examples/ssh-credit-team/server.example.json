@@ -1,0 +1,8 @@
+{
+  "listen_address": "127.0.0.1:8080",
+  "database_path": "/var/lib/vota/vota.sqlite",
+  "public_base_url": "https://vota.example",
+  "checkpoint_key_path": "/var/lib/vota/checkpoint.key",
+  "issuer_key_path": "/var/lib/vota/issuer.key",
+  "admin_keys_path": "/var/lib/vota/admin.keys"
+}

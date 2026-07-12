@@ -1,9 +1,8 @@
-// Package httpclient calls Vota's versioned collector API.
+// Package httpclient calls Vota's sequencer API.
 package httpclient
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -12,7 +11,6 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/cirocosta/vota/internal/app"
 	"github.com/cirocosta/vota/internal/protocol"
 )
 
@@ -46,104 +44,7 @@ func New(baseURL string, httpClient *http.Client) (*Client, error) {
 	return &Client{baseURL: parsed, http: httpClient}, nil
 }
 
-func (client *Client) PublishPoll(ctx context.Context, manifest protocol.Manifest, adminToken string) (protocol.Manifest, bool, error) {
-	var result protocol.Manifest
-	status, err := client.doJSON(ctx, http.MethodPost, "/v1/polls", manifest, adminToken, &result)
-	return result, status == http.StatusCreated, err
-}
-
-func (client *Client) PublishPollArtifact(ctx context.Context, encoded []byte, adminToken string) (protocol.Manifest, bool, error) {
-	var result protocol.Manifest
-	status, err := client.doRawJSON(ctx, http.MethodPost, "/v1/polls", encoded, adminToken, &result)
-	return result, status == http.StatusCreated, err
-}
-
-func (client *Client) Poll(ctx context.Context, pollID string) (app.PollStatus, error) {
-	var result app.PollStatus
-	_, err := client.doJSON(ctx, http.MethodGet, "/v1/polls/"+url.PathEscape(pollID), nil, "", &result)
-	return result, err
-}
-
-func (client *Client) SubmitBallot(ctx context.Context, ballot protocol.BallotEnvelope) (protocol.Receipt, bool, error) {
-	var result protocol.Receipt
-	status, err := client.doJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(ballot.PollID)+"/ballots", ballot, "", &result)
-	return result, status == http.StatusCreated, err
-}
-
-func (client *Client) SubmitBallotArtifact(ctx context.Context, pollID string, encoded []byte) (protocol.Receipt, bool, error) {
-	var result protocol.Receipt
-	status, err := client.doRawJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(pollID)+"/ballots", encoded, "", &result)
-	return result, status == http.StatusCreated, err
-}
-
-func (client *Client) Receipt(ctx context.Context, pollID, ballotHash string) (protocol.Receipt, error) {
-	var result protocol.Receipt
-	path := "/v1/polls/" + url.PathEscape(pollID) + "/receipts/" + url.PathEscape(ballotHash)
-	_, err := client.doJSON(ctx, http.MethodGet, path, nil, "", &result)
-	return result, err
-}
-
-func (client *Client) ClosePoll(ctx context.Context, pollID, adminToken string) (protocol.EncryptedAggregate, error) {
-	var result protocol.EncryptedAggregate
-	_, err := client.doJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(pollID)+"/close", nil, adminToken, &result)
-	return result, err
-}
-
-func (client *Client) SubmitTrusteeShare(ctx context.Context, share protocol.TrusteeShare) (*protocol.Tally, bool, error) {
-	var result struct {
-		Tally *protocol.Tally `json:"tally"`
-	}
-	status, err := client.doJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(share.PollID)+"/tally-shares", share, "", &result)
-	return result.Tally, status == http.StatusCreated, err
-}
-
-func (client *Client) SubmitTrusteeShareArtifact(ctx context.Context, pollID string, encoded []byte) (*protocol.Tally, bool, error) {
-	var result struct {
-		Tally *protocol.Tally `json:"tally"`
-	}
-	status, err := client.doRawJSON(ctx, http.MethodPost, "/v1/polls/"+url.PathEscape(pollID)+"/tally-shares", encoded, "", &result)
-	return result.Tally, status == http.StatusCreated, err
-}
-
-func (client *Client) Tally(ctx context.Context, pollID string) (protocol.Tally, error) {
-	var result protocol.Tally
-	_, err := client.doJSON(ctx, http.MethodGet, "/v1/polls/"+url.PathEscape(pollID)+"/tally", nil, "", &result)
-	return result, err
-}
-
-func (client *Client) Audit(ctx context.Context, pollID string) ([]byte, error) {
-	request, err := client.request(ctx, http.MethodGet, "/v1/polls/"+url.PathEscape(pollID)+"/audit", nil, "")
-	if err != nil {
-		return nil, err
-	}
-	response, err := client.http.Do(request)
-	if err != nil {
-		return nil, err
-	}
-	defer response.Body.Close()
-	reader := io.Reader(response.Body)
-	if response.Header.Get("Content-Encoding") == "gzip" {
-		gzipReader, err := gzip.NewReader(response.Body)
-		if err != nil {
-			return nil, err
-		}
-		defer gzipReader.Close()
-		reader = gzipReader
-	}
-	body, err := io.ReadAll(io.LimitReader(reader, maxResponseBytes+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > maxResponseBytes {
-		return nil, fmt.Errorf("response too large")
-	}
-	if response.StatusCode >= 400 {
-		return nil, decodeError(response.StatusCode, body)
-	}
-	return body, nil
-}
-
-func (client *Client) doJSON(ctx context.Context, method, path string, input any, adminToken string, output any) (int, error) {
+func (client *Client) doJSON(ctx context.Context, method, path string, input any, _ string, output any) (int, error) {
 	var body []byte
 	var err error
 	if input != nil {
@@ -152,11 +53,7 @@ func (client *Client) doJSON(ctx context.Context, method, path string, input any
 			return 0, err
 		}
 	}
-	return client.doRawJSON(ctx, method, path, body, adminToken, output)
-}
-
-func (client *Client) doRawJSON(ctx context.Context, method, path string, body []byte, adminToken string, output any) (int, error) {
-	request, err := client.request(ctx, method, path, body, adminToken)
+	request, err := client.request(ctx, method, path, body)
 	if err != nil {
 		return 0, err
 	}
@@ -179,11 +76,15 @@ func (client *Client) doRawJSON(ctx context.Context, method, path string, body [
 		if err := protocol.DecodeStrict(responseBody, output); err != nil {
 			return response.StatusCode, fmt.Errorf("decode response: %w", err)
 		}
+		canonical, err := protocol.MarshalCanonical(output)
+		if err != nil || !bytes.Equal(responseBody, canonical) {
+			return response.StatusCode, fmt.Errorf("decode response: noncanonical JSON")
+		}
 	}
 	return response.StatusCode, nil
 }
 
-func (client *Client) request(ctx context.Context, method, path string, body []byte, adminToken string) (*http.Request, error) {
+func (client *Client) request(ctx context.Context, method, path string, body []byte) (*http.Request, error) {
 	target := *client.baseURL
 	target.Path += path
 	request, err := http.NewRequestWithContext(ctx, method, target.String(), bytes.NewReader(body))
@@ -192,9 +93,6 @@ func (client *Client) request(ctx context.Context, method, path string, body []b
 	}
 	if body != nil {
 		request.Header.Set("Content-Type", "application/json")
-	}
-	if adminToken != "" {
-		request.Header.Set("Authorization", "Bearer "+adminToken)
 	}
 	return request, nil
 }

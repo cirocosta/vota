@@ -37,12 +37,7 @@ jobs:
           govulncheck ./...
       - name: Fuzz smoke tests
         run: |
-          go test ./internal/crypto/lrs -run '^$' -fuzz '^FuzzParseSignature$' -fuzztime=5s
-          go test ./internal/crypto/election -run '^$' -fuzz '^FuzzArtifactParsers$' -fuzztime=5s
-      - name: Benchmark compilation
-        run: |
-          go test ./internal/crypto/lrs -run '^$' -bench 'Benchmark(Sign|Verify)$' -benchtime=1x
-          go test ./internal/crypto/election -run '^$' -bench 'Benchmark(BallotProof|ThresholdTally)$' -benchtime=1x
+          go test ./internal/crypto/blind -run '^$' -fuzz '^FuzzVerify$' -fuzztime=5s
       - name: Secret scan
         run: |
           go install github.com/zricethezav/gitleaks/v8@v8.30.1

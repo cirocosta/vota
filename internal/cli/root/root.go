@@ -5,11 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/cirocosta/vota/internal/cli/admin"
-	"github.com/cirocosta/vota/internal/cli/auditcmd"
+	"github.com/cirocosta/vota/internal/cli/sequencercmd"
 	"github.com/cirocosta/vota/internal/cli/server"
-	"github.com/cirocosta/vota/internal/cli/trustee"
-	"github.com/cirocosta/vota/internal/cli/voter"
 	"github.com/spf13/cobra"
 )
 
@@ -45,11 +42,9 @@ func New(info BuildInfo) *cobra.Command {
 	}
 	cmd.SetHelpTemplate(cmd.HelpTemplate() + "\n" + experimentalWarning + "\n")
 	cmd.AddCommand(newVersionCommand(info))
-	cmd.AddCommand(admin.Commands(admin.Options{})...)
-	cmd.AddCommand(voter.Commands(voter.Options{})...)
-	cmd.AddCommand(trustee.Commands(trustee.Options{})...)
-	cmd.AddCommand(auditcmd.Command(auditcmd.Options{}))
+	cmd.AddCommand(sequencercmd.Commands(sequencercmd.Options{})...)
 	cmd.AddCommand(server.Command(server.Options{}))
+	cmd.AddCommand(server.DiagnoseCommand())
 	return cmd
 }
 

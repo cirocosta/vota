@@ -1,0 +1,6 @@
+/vota
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+checkpoint.key
+issuer.key

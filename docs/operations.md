@@ -1,73 +1,130 @@
-# Collector Operations
+# Operations
 
-Vota is a local educational collector, not a production election service. The
-`serve` command reads strict JSON or YAML:
+Read the [security model](security.md) before exposing Vota to a network. The
+server assumes its operator and reverse proxy do not correlate or log client
+metadata.
+
+## Files
+
+One persistent directory is enough:
+
+```text
+/var/lib/vota/
+  vota.sqlite
+  checkpoint.key
+  issuer.key
+  admin.keys
+  server.json
+```
+
+`checkpoint.key` and `issuer.key` must be mode `0600`. Back up the database and
+both private keys as one set. Restoring only the database loses the ability to
+issue valid credentials or prove continuity of signed history.
+
+## Configuration
 
 ```json
 {
   "listen_address": "127.0.0.1:8080",
-  "database_path": "./vota.sqlite",
-  "public_base_url": "http://127.0.0.1:8080",
-  "admin_token_hashes": ["sha256:<64 lowercase hex characters>"],
-  "checkpoint_key_path": "./checkpoint.key",
-  "shutdown_timeout": "10s",
-  "log_level": "info"
+  "database_path": "/var/lib/vota/vota.sqlite",
+  "public_base_url": "https://vota.example",
+  "checkpoint_key_path": "/var/lib/vota/checkpoint.key",
+  "issuer_key_path": "/var/lib/vota/issuer.key",
+  "admin_keys_path": "/var/lib/vota/admin.keys",
+  "shutdown_timeout": "10s"
 }
 ```
 
-Start the collector:
-
-```sh
-vota serve --config server.json
-```
-
-## Configuration behavior
-
-- `listen_address` defaults to `127.0.0.1:8080`.
-- A non-loopback address fails unless `acknowledge_experimental: true` is set.
-- `database_path`, `checkpoint_key_path`, and at least one precomputed
-  `admin_token_hashes` entry are required.
-- `public_base_url` is validated when present. The current collector does not
-  use it to construct responses.
-- `tls_certificate_path` and `tls_private_key_path` must be configured
-  together. When present, the process uses Go's HTTPS server.
-- Request bodies default to 1 MiB. Verification concurrency defaults to four.
-- Request, read, write, idle, header, and shutdown limits have bounded defaults
-  in `internal/httpapi` and `internal/cli/server`.
-- Log levels are `debug`, `info`, `warn`, and `error`. Logs contain fixed
-  request metadata, not request bodies or artifact identifiers.
-
-The checkpoint key is an Ed25519 private key used for checkpoints, receipts,
-and tally signatures. On first startup Vota creates the configured key file
-with owner-only permissions. The server refuses an existing group-readable or
-world-readable key. This unattended server key is not encrypted by a
-passphrase; protect the host and file.
-
-The SQLite store enables foreign keys, WAL mode, migrations, and transactional
-state changes. Restarting with the same database and checkpoint key preserves
-the public history and signature identity.
-
-## HTTP surface
-
-The implemented routes are:
+`admin.keys` contains one canonical `ssh-ed25519` public key per line. A
+display name before the key is also accepted.
 
 ```text
-POST /v1/polls
-GET  /v1/polls/{poll_id}
-POST /v1/polls/{poll_id}/ballots
-GET  /v1/polls/{poll_id}/receipts/{ballot_hash}
-POST /v1/polls/{poll_id}/close
-POST /v1/polls/{poll_id}/tally-shares
-GET  /v1/polls/{poll_id}/tally
-GET  /v1/polls/{poll_id}/audit
-GET  /healthz
-GET  /readyz
+alice ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAA...
 ```
 
-Poll publication and close require a bearer token whose SHA-256 hash matches
-the configured set. Other mutation integrity comes from ballot or trustee
-proofs and signatures. `/healthz` reports process health. `/readyz` checks the
-database through the application service.
+Start the process:
 
-SIGINT and SIGTERM start bounded graceful shutdown. The collector stops
-accepting connections, waits for active HTTP requests, and closes SQLite.
+```sh
+vota serve --config /var/lib/vota/server.json
+```
+
+Optional single-container deployment:
+
+```sh
+cp examples/ssh-credit-team/server.container.example.json \
+  /var/lib/vota/server.json
+docker build -f examples/ssh-credit-team/Dockerfile -t vota .
+docker run --rm \
+  -p 127.0.0.1:8080:8080 \
+  -v /var/lib/vota:/data \
+  vota
+```
+
+The container still runs one Vota process and uses one mounted SQLite
+database. The example publishes only to host loopback and acknowledges the
+experimental non-loopback listener inside the container. Change
+`public_base_url` before sharing a poll URL.
+
+The first start creates the issuer and checkpoint keys. A non-loopback listener
+requires configured TLS or `acknowledge_experimental: true`. Prefer a local
+listener behind one TLS reverse proxy.
+
+## Reverse proxy logging
+
+Disable access logs for Vota. Do not add request tracing, distributed tracing,
+body logging, query logging, client-IP headers, or per-poll metric labels.
+
+Minimal Caddy example:
+
+```text
+vota.example {
+    log {
+        output discard
+    }
+    reverse_proxy 127.0.0.1:8080
+}
+```
+
+The proxy and Vota remain one trust domain. The proxy is not an anonymity
+network.
+
+## Health
+
+```sh
+curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:8080/readyz
+vota diagnose --config /var/lib/vota/server.json
+```
+
+Readiness replays both hash chains and verifies stored checkpoints. Diagnose
+prints aggregate counts only. It never prints poll IDs, SSH fingerprints,
+credentials, or choices.
+
+## Backup and restore
+
+Stop Vota cleanly, then copy the complete persistent directory:
+
+```sh
+systemctl stop vota
+tar -C /var/lib -czf vota-backup.tgz vota
+systemctl start vota
+```
+
+Restore into an empty directory with the original permissions, start Vota, and
+check readiness plus a known closed result:
+
+```sh
+tar -C /var/lib -xzf vota-backup.tgz
+chmod 600 /var/lib/vota/checkpoint.key /var/lib/vota/issuer.key
+vota serve --config /var/lib/vota/server.json
+```
+
+The end-to-end test exercises restart and restore from copied database and key
+files.
+
+## Key rotation
+
+Issuer and checkpoint rotation is not supported in version 1. Replacing either
+key invalidates continuity for existing polls. Create a new deployment and keep
+the old server or its audit exports available until old polls no longer need
+verification.
