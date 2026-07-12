@@ -1,0 +1,9 @@
+{
+  "listen_address": "0.0.0.0:8080",
+  "database_path": "/data/vota.sqlite",
+  "public_base_url": "http://127.0.0.1:8080",
+  "checkpoint_key_path": "/data/checkpoint.key",
+  "issuer_key_path": "/data/issuer.key",
+  "admin_keys_path": "/data/admin.keys",
+  "acknowledge_experimental": true
+}

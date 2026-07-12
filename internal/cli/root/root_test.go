@@ -39,7 +39,7 @@ func TestVersionJSON(t *testing.T) {
 	}
 }
 
-func TestRootWiresRoleAndServerCommands(t *testing.T) {
+func TestRootWiresSequencerCommands(t *testing.T) {
 	t.Parallel()
 
 	cmd := New(BuildInfo{})
@@ -48,7 +48,7 @@ func TestRootWiresRoleAndServerCommands(t *testing.T) {
 		names = append(names, child.Name())
 	}
 	slices.Sort(names)
-	want := []string{"admin", "audit", "identity", "poll", "serve", "tally", "trustee", "version", "vote"}
+	want := []string{"audit", "diagnose", "poll", "serve", "version", "vote"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("commands = %v, want %v", names, want)
 	}
@@ -60,7 +60,7 @@ func TestSubcommandHelpAndExecutionWarn(t *testing.T) {
 	help := New(BuildInfo{})
 	var helpOutput bytes.Buffer
 	help.SetOut(&helpOutput)
-	help.SetArgs([]string{"admin", "--help"})
+	help.SetArgs([]string{"poll", "--help"})
 	if err := help.Execute(); err != nil {
 		t.Fatal(err)
 	}

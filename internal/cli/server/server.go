@@ -1,11 +1,10 @@
-// Package server provides the collector server Cobra command.
+// Package server provides the single-process Vota sequencer command.
 package server
 
 import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -16,38 +15,41 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/cirocosta/vota/internal/app"
+	"github.com/cirocosta/vota/internal/crypto/blind"
+	"github.com/cirocosta/vota/internal/crypto/sshsig"
 	"github.com/cirocosta/vota/internal/httpapi"
 	"github.com/cirocosta/vota/internal/protocol"
-	"github.com/cirocosta/vota/internal/store"
+	"github.com/cirocosta/vota/internal/sequencer"
+	"github.com/cirocosta/vota/internal/sequencerstore"
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
 
 type Config struct {
-	ListenAddress           string   `json:"listen_address" yaml:"listen_address"`
-	DatabasePath            string   `json:"database_path" yaml:"database_path"`
-	PublicBaseURL           string   `json:"public_base_url" yaml:"public_base_url"`
-	AdminTokenHashes        []string `json:"admin_token_hashes" yaml:"admin_token_hashes"`
-	CheckpointKeyPath       string   `json:"checkpoint_key_path" yaml:"checkpoint_key_path"`
-	TLSCertificatePath      string   `json:"tls_certificate_path,omitempty" yaml:"tls_certificate_path,omitempty"`
-	TLSPrivateKeyPath       string   `json:"tls_private_key_path,omitempty" yaml:"tls_private_key_path,omitempty"`
-	MaxBodyBytes            int64    `json:"max_body_bytes,omitempty" yaml:"max_body_bytes,omitempty"`
-	VerificationConcurrency int      `json:"verification_concurrency,omitempty" yaml:"verification_concurrency,omitempty"`
-	RequestTimeout          string   `json:"request_timeout,omitempty" yaml:"request_timeout,omitempty"`
-	ShutdownTimeout         string   `json:"shutdown_timeout,omitempty" yaml:"shutdown_timeout,omitempty"`
-	ReadHeaderTimeout       string   `json:"read_header_timeout,omitempty" yaml:"read_header_timeout,omitempty"`
-	ReadTimeout             string   `json:"read_timeout,omitempty" yaml:"read_timeout,omitempty"`
-	WriteTimeout            string   `json:"write_timeout,omitempty" yaml:"write_timeout,omitempty"`
-	IdleTimeout             string   `json:"idle_timeout,omitempty" yaml:"idle_timeout,omitempty"`
-	MaxHeaderBytes          int      `json:"max_header_bytes,omitempty" yaml:"max_header_bytes,omitempty"`
-	LogLevel                string   `json:"log_level,omitempty" yaml:"log_level,omitempty"`
-	AcknowledgeExperimental bool     `json:"acknowledge_experimental,omitempty" yaml:"acknowledge_experimental,omitempty"`
+	ListenAddress           string `json:"listen_address" yaml:"listen_address"`
+	DatabasePath            string `json:"database_path" yaml:"database_path"`
+	PublicBaseURL           string `json:"public_base_url" yaml:"public_base_url"`
+	CheckpointKeyPath       string `json:"checkpoint_key_path" yaml:"checkpoint_key_path"`
+	IssuerKeyPath           string `json:"issuer_key_path" yaml:"issuer_key_path"`
+	AdminKeysPath           string `json:"admin_keys_path" yaml:"admin_keys_path"`
+	TLSCertificatePath      string `json:"tls_certificate_path,omitempty" yaml:"tls_certificate_path,omitempty"`
+	TLSPrivateKeyPath       string `json:"tls_private_key_path,omitempty" yaml:"tls_private_key_path,omitempty"`
+	MaxBodyBytes            int64  `json:"max_body_bytes,omitempty" yaml:"max_body_bytes,omitempty"`
+	RequestTimeout          string `json:"request_timeout,omitempty" yaml:"request_timeout,omitempty"`
+	ShutdownTimeout         string `json:"shutdown_timeout,omitempty" yaml:"shutdown_timeout,omitempty"`
+	ReadHeaderTimeout       string `json:"read_header_timeout,omitempty" yaml:"read_header_timeout,omitempty"`
+	ReadTimeout             string `json:"read_timeout,omitempty" yaml:"read_timeout,omitempty"`
+	WriteTimeout            string `json:"write_timeout,omitempty" yaml:"write_timeout,omitempty"`
+	IdleTimeout             string `json:"idle_timeout,omitempty" yaml:"idle_timeout,omitempty"`
+	MaxHeaderBytes          int    `json:"max_header_bytes,omitempty" yaml:"max_header_bytes,omitempty"`
+	LogLevel                string `json:"log_level,omitempty" yaml:"log_level,omitempty"`
+	AcknowledgeExperimental bool   `json:"acknowledge_experimental,omitempty" yaml:"acknowledge_experimental,omitempty"`
 }
 
 type Options struct {
@@ -70,10 +72,7 @@ func Command(options Options) *cobra.Command {
 	}
 	var configPath string
 	command := &cobra.Command{
-		Use:   "serve",
-		Short: "run the experimental collector",
-		Long:  "Run the experimental Vota collector. It is not suitable for real elections.",
-		Args:  cobra.NoArgs,
+		Use: "serve", Short: "run the SSH-credit poll sequencer", Args: cobra.NoArgs,
 		RunE: func(command *cobra.Command, _ []string) error {
 			config, err := LoadConfig(configPath)
 			if err != nil {
@@ -85,6 +84,69 @@ func Command(options Options) *cobra.Command {
 		},
 	}
 	command.Flags().StringVar(&configPath, "config", "", "JSON or YAML server configuration path")
+	_ = command.MarkFlagRequired("config")
+	return command
+}
+
+func DiagnoseCommand() *cobra.Command {
+	var configPath string
+	command := &cobra.Command{
+		Use: "diagnose", Short: "report aggregate sequencer health", Args: cobra.NoArgs,
+		RunE: func(command *cobra.Command, _ []string) error {
+			config, err := LoadConfig(configPath)
+			if err != nil {
+				return err
+			}
+			for _, path := range []string{config.CheckpointKeyPath, config.IssuerKeyPath} {
+				if _, err := os.Stat(path); err != nil {
+					return fmt.Errorf("sequencer key unavailable: %w", err)
+				}
+			}
+			checkpointKey, err := loadOrCreateCheckpointKey(config.CheckpointKeyPath, rand.Reader)
+			if err != nil {
+				return err
+			}
+			issuerData, err := os.ReadFile(config.IssuerKeyPath)
+			if err != nil {
+				return err
+			}
+			issuerKey, err := blind.ParsePrivateKey(issuerData)
+			if err != nil {
+				return err
+			}
+			adminKeys, err := loadAdminKeys(config.AdminKeysPath)
+			if err != nil {
+				return err
+			}
+			database, err := sequencerstore.Open(command.Context(), config.DatabasePath)
+			if err != nil {
+				return err
+			}
+			defer database.Close()
+			service, err := sequencer.New(sequencer.Config{Store: database, IssuerPrivateKey: issuerKey, CheckpointPrivateKey: checkpointKey, AdminPublicKeys: adminKeys})
+			if err != nil {
+				return err
+			}
+			if err := service.Ready(command.Context()); err != nil {
+				return err
+			}
+			stats, err := database.Stats(command.Context())
+			if err != nil {
+				return err
+			}
+			output := struct {
+				Status string `json:"status"`
+				sequencerstore.Stats
+			}{Status: "ready", Stats: stats}
+			encoded, err := protocol.MarshalCanonical(output)
+			if err != nil {
+				return err
+			}
+			_, err = fmt.Fprintln(command.OutOrStdout(), string(encoded))
+			return err
+		},
+	}
+	command.Flags().StringVar(&configPath, "config", "", "server configuration path")
 	_ = command.MarkFlagRequired("config")
 	return command
 }
@@ -124,13 +186,24 @@ func Run(ctx context.Context, config Config, stderr io.Writer, random io.Reader)
 	if err != nil {
 		return err
 	}
-	database, err := store.Open(ctx, config.DatabasePath)
+	issuerKey, _, err := blind.LoadOrCreatePrivateKey(config.IssuerKeyPath)
+	if err != nil {
+		return err
+	}
+	adminKeys, err := loadAdminKeys(config.AdminKeysPath)
+	if err != nil {
+		return err
+	}
+	database, err := sequencerstore.Open(ctx, config.DatabasePath)
 	if err != nil {
 		return err
 	}
 	defer database.Close()
-	service, err := app.NewService(database, checkpointKey, app.ServiceOptions{})
+	service, err := sequencer.New(sequencer.Config{Store: database, IssuerPrivateKey: issuerKey, CheckpointPrivateKey: checkpointKey, AdminPublicKeys: adminKeys})
 	if err != nil {
+		return err
+	}
+	if err := service.Ready(ctx); err != nil {
 		return err
 	}
 	level, err := parseLogLevel(config.LogLevel)
@@ -138,15 +211,8 @@ func Run(ctx context.Context, config Config, stderr io.Writer, random io.Reader)
 		return err
 	}
 	logger := slog.New(slog.NewJSONHandler(stderr, &slog.HandlerOptions{Level: level}))
-	hashes, err := adminHashes(config.AdminTokenHashes)
-	if err != nil {
-		return err
-	}
 	requestTimeout, _ := duration(config.RequestTimeout, 15*time.Second)
-	api, err := httpapi.New(httpapi.Config{
-		Service: service, AdminTokenHashes: hashes, MaxBodyBytes: config.MaxBodyBytes,
-		VerificationConcurrency: config.VerificationConcurrency, RequestTimeout: requestTimeout, Logger: logger,
-	})
+	api, err := httpapi.NewSequencer(httpapi.SequencerConfig{Service: service, PublicBaseURL: config.PublicBaseURL, MaxBodyBytes: config.MaxBodyBytes, RequestTimeout: requestTimeout, Logger: logger})
 	if err != nil {
 		return err
 	}
@@ -154,19 +220,16 @@ func Run(ctx context.Context, config Config, stderr io.Writer, random io.Reader)
 	readTimeout, _ := duration(config.ReadTimeout, 15*time.Second)
 	writeTimeout, _ := duration(config.WriteTimeout, 30*time.Second)
 	idleTimeout, _ := duration(config.IdleTimeout, 60*time.Second)
-	server := httpapi.NewServer(httpapi.ServerConfig{
-		Address: config.ListenAddress, Handler: api, ReadHeaderTimeout: readHeaderTimeout,
-		ReadTimeout: readTimeout, WriteTimeout: writeTimeout, IdleTimeout: idleTimeout, MaxHeaderBytes: config.MaxHeaderBytes,
-	})
+	httpServer := httpapi.NewServer(httpapi.ServerConfig{Address: config.ListenAddress, Handler: api, ReadHeaderTimeout: readHeaderTimeout, ReadTimeout: readTimeout, WriteTimeout: writeTimeout, IdleTimeout: idleTimeout, MaxHeaderBytes: config.MaxHeaderBytes})
 	done := make(chan error, 1)
 	go func() {
 		if config.TLSCertificatePath != "" {
-			done <- server.ListenAndServeTLS(config.TLSCertificatePath, config.TLSPrivateKeyPath)
+			done <- httpServer.ListenAndServeTLS(config.TLSCertificatePath, config.TLSPrivateKeyPath)
 			return
 		}
-		done <- server.ListenAndServe()
+		done <- httpServer.ListenAndServe()
 	}()
-	logger.Warn("experimental collector started", "address", config.ListenAddress, "suitable_for_real_elections", false)
+	logger.Warn("experimental sequencer started", "address", config.ListenAddress, "suitable_for_real_elections", false)
 	select {
 	case err := <-done:
 		if errors.Is(err, http.ErrServerClosed) {
@@ -177,7 +240,7 @@ func Run(ctx context.Context, config Config, stderr io.Writer, random io.Reader)
 		shutdownTimeout, _ := duration(config.ShutdownTimeout, 10*time.Second)
 		shutdownContext, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
-		if err := httpapi.Shutdown(shutdownContext, server); err != nil {
+		if err := httpapi.Shutdown(shutdownContext, httpServer); err != nil {
 			return err
 		}
 		err := <-done
@@ -193,32 +256,23 @@ func validateConfig(config Config) error {
 	if err != nil {
 		return fmt.Errorf("invalid listen address")
 	}
-	if !isLoopback(host) && !config.AcknowledgeExperimental {
-		return fmt.Errorf("non_loopback_requires_experimental_acknowledgement")
-	}
-	if strings.TrimSpace(config.DatabasePath) == "" || strings.TrimSpace(config.CheckpointKeyPath) == "" {
-		return fmt.Errorf("database_path and checkpoint_key_path are required")
-	}
-	if config.PublicBaseURL != "" {
-		parsed, err := url.Parse(config.PublicBaseURL)
-		if err != nil || parsed.Scheme == "" || parsed.Host == "" {
-			return fmt.Errorf("invalid public_base_url")
-		}
-	}
-	if len(config.AdminTokenHashes) == 0 {
-		return fmt.Errorf("admin_token_hashes are required")
-	}
-	if _, err := adminHashes(config.AdminTokenHashes); err != nil {
-		return err
+	hasTLS := config.TLSCertificatePath != "" && config.TLSPrivateKeyPath != ""
+	if !isLoopback(host) && !hasTLS && !config.AcknowledgeExperimental {
+		return fmt.Errorf("non_loopback_requires_tls_or_experimental_acknowledgement")
 	}
 	if (config.TLSCertificatePath == "") != (config.TLSPrivateKeyPath == "") {
 		return fmt.Errorf("TLS certificate and private key must be configured together")
 	}
-	for name, value := range map[string]string{
-		"request_timeout": config.RequestTimeout, "shutdown_timeout": config.ShutdownTimeout,
-		"read_header_timeout": config.ReadHeaderTimeout, "read_timeout": config.ReadTimeout,
-		"write_timeout": config.WriteTimeout, "idle_timeout": config.IdleTimeout,
-	} {
+	for name, value := range map[string]string{"database_path": config.DatabasePath, "checkpoint_key_path": config.CheckpointKeyPath, "issuer_key_path": config.IssuerKeyPath, "admin_keys_path": config.AdminKeysPath, "public_base_url": config.PublicBaseURL} {
+		if strings.TrimSpace(value) == "" {
+			return fmt.Errorf("%s is required", name)
+		}
+	}
+	parsedURL, err := url.Parse(config.PublicBaseURL)
+	if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return fmt.Errorf("invalid public_base_url")
+	}
+	for name, value := range map[string]string{"request_timeout": config.RequestTimeout, "shutdown_timeout": config.ShutdownTimeout, "read_header_timeout": config.ReadHeaderTimeout, "read_timeout": config.ReadTimeout, "write_timeout": config.WriteTimeout, "idle_timeout": config.IdleTimeout} {
 		if value != "" {
 			parsed, err := time.ParseDuration(value)
 			if err != nil || parsed <= 0 {
@@ -237,21 +291,46 @@ func withDefaults(config Config) Config {
 	return config
 }
 
-func adminHashes(values []string) ([][sha256.Size]byte, error) {
-	hashes := make([][sha256.Size]byte, len(values))
-	for index, value := range values {
-		decoded, err := protocol.DecodeFixedHex("sha256", value, sha256.Size)
-		if err != nil {
-			return nil, fmt.Errorf("invalid admin token hash at index %d", index)
-		}
-		copy(hashes[index][:], decoded)
+func loadAdminKeys(path string) ([]string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read admin keys: %w", err)
 	}
-	return hashes, nil
+	var output []string
+	seen := make(map[string]struct{})
+	for lineNumber, raw := range strings.Split(string(data), "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) >= 3 && fields[0] != "ssh-ed25519" {
+			line = strings.Join(fields[1:], " ")
+		}
+		key, err := sshsig.ParsePublicKey([]byte(line))
+		if err != nil {
+			return nil, fmt.Errorf("invalid admin key on line %d: %w", lineNumber+1, err)
+		}
+		canonical, _ := sshsig.CanonicalPublicKey(key)
+		fingerprint, _ := sshsig.Fingerprint(key)
+		if _, duplicate := seen[fingerprint]; duplicate {
+			return nil, fmt.Errorf("duplicate admin key on line %d", lineNumber+1)
+		}
+		seen[fingerprint] = struct{}{}
+		output = append(output, string(canonical))
+	}
+	if len(output) == 0 {
+		return nil, fmt.Errorf("admin_keys_path contains no keys")
+	}
+	return output, nil
 }
 
 func loadOrCreateCheckpointKey(path string, random io.Reader) (ed25519.PrivateKey, error) {
 	encoded, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, err
+		}
 		_, privateKey, err := ed25519.GenerateKey(random)
 		if err != nil {
 			return nil, err
@@ -268,6 +347,10 @@ func loadOrCreateCheckpointKey(path string, random io.Reader) (ed25519.PrivateKe
 			_ = file.Close()
 			return nil, err
 		}
+		if err := file.Sync(); err != nil {
+			_ = file.Close()
+			return nil, err
+		}
 		if err := file.Close(); err != nil {
 			return nil, err
 		}
@@ -280,7 +363,7 @@ func loadOrCreateCheckpointKey(path string, random io.Reader) (ed25519.PrivateKe
 	if err != nil {
 		return nil, err
 	}
-	if info.Mode().Perm()&0o077 != 0 {
+	if info.Mode().Perm() != 0o600 {
 		return nil, fmt.Errorf("checkpoint key permissions must be 0600")
 	}
 	var material checkpointMaterial
