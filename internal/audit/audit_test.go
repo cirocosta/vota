@@ -171,6 +171,26 @@ func TestParseBundleRejectsNoncanonicalEncoding(t *testing.T) {
 	}
 }
 
+func TestParseBundleRejectsUppercaseCheckpointKey(t *testing.T) {
+	t.Parallel()
+
+	value := testManifest(t).Manifest()
+	privateKey := checkpointPrivateKey()
+	bundle := sparseBundle(t, value, testEvents(t, value.PollID), privateKey)
+	prefix, payload, ok := strings.Cut(bundle.CheckpointKey, ":")
+	if !ok {
+		t.Fatal("checkpoint key missing prefix")
+	}
+	bundle.CheckpointKey = prefix + ":" + strings.ToUpper(payload)
+	encoded, err := protocol.MarshalCanonical(bundle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := ParseBundle(encoded); ErrorCode(err) != "invalid_checkpoint_key" {
+		t.Fatalf("parse error = %v", err)
+	}
+}
+
 func TestCompareCheckpointsDetectsFork(t *testing.T) {
 	t.Parallel()
 
