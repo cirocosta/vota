@@ -269,6 +269,51 @@ func TestVerifyRejectsUppercaseOpaqueCommitment(t *testing.T) {
 	}
 }
 
+func TestVerifyRejectsNoncanonicalWindowTimes(t *testing.T) {
+	t.Parallel()
+
+	draft, authorityPrivateKey := completeDraft(t)
+	frozen, err := Freeze(draft, authorityPrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := frozen.Manifest()
+	tests := []struct {
+		name   string
+		change func(*protocol.Manifest)
+		code   string
+	}{
+		{"offset opens at", func(value *protocol.Manifest) {
+			value.OpensAt = "2026-08-01T08:00:00-04:00"
+		}, "invalid_opens_at"},
+		{"fractional closes at", func(value *protocol.Manifest) {
+			value.ClosesAt = "2026-08-02T12:00:00.000Z"
+		}, "invalid_closes_at"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			value := base
+			test.change(&value)
+			value.PollDraftID, err = manifestDraftID(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value.PollID, err = pollID(value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			signature, err := signManifest(authorityPrivateKey, value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			value.AuthoritySignature = "ed25519sig:" + hex.EncodeToString(signature)
+			if err := Verify(value); ErrorCode(err) != test.code {
+				t.Fatalf("verify error = %v, want %s", err, test.code)
+			}
+		})
+	}
+}
+
 func completeDraft(tb testing.TB) (Draft, ed25519.PrivateKey) {
 	tb.Helper()
 	draft, authorityPrivateKey := baseDraft(tb)
