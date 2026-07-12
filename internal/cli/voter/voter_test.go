@@ -71,6 +71,21 @@ func TestIdentityCreateAndEnrollmentExport(t *testing.T) {
 	}
 }
 
+func TestIdentityCreateRejectsUppercaseDraftID(t *testing.T) {
+	directory := t.TempDir()
+	identityPath := filepath.Join(directory, "voter.key")
+	draftID := "sha256:" + strings.ToUpper(strings.Repeat("ab", 32))
+
+	command := commandRoot(testOptions())
+	command.SetArgs([]string{"identity", "create", "--poll", draftID, "--out", identityPath})
+	if err := command.Execute(); err == nil {
+		t.Fatal("expected uppercase draft ID failure")
+	}
+	if _, err := os.Stat(identityPath); !os.IsNotExist(err) {
+		t.Fatalf("identity stat error = %v", err)
+	}
+}
+
 func TestVoteCastCreatesPrivateBallotWithoutChoiceDisclosure(t *testing.T) {
 	directory := t.TempDir()
 	manifestPath := copyManifestFixture(t, directory)
