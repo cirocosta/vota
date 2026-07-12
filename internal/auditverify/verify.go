@@ -4,9 +4,7 @@ package auditverify
 import (
 	"bytes"
 	"crypto/ed25519"
-	"encoding/hex"
 	"fmt"
-	"strings"
 
 	"github.com/cirocosta/vota/internal/app"
 	"github.com/cirocosta/vota/internal/audit"
@@ -157,9 +155,8 @@ func expectEvent(bundle audit.Bundle, position *int, eventType, objectHash strin
 }
 
 func checkpointKey(value string) (ed25519.PublicKey, error) {
-	payload, ok := strings.CutPrefix(value, "ed25519:")
-	decoded, err := hex.DecodeString(payload)
-	if !ok || err != nil || len(decoded) != ed25519.PublicKeySize || payload != strings.ToLower(payload) {
+	decoded, err := protocol.DecodeFixedHex("ed25519", value, ed25519.PublicKeySize)
+	if err != nil {
 		return nil, &Error{Code: "invalid_checkpoint_key"}
 	}
 	return ed25519.PublicKey(decoded), nil
