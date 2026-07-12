@@ -171,12 +171,11 @@ func receiptMessage(receipt protocol.Receipt) ([]byte, error) {
 }
 
 func decodeSignature(value string) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, "ed25519sig:")
-	if !ok {
+	if _, ok := strings.CutPrefix(value, "ed25519sig:"); !ok {
 		return nil, fmt.Errorf("missing signature prefix")
 	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil || len(decoded) != ed25519.SignatureSize || payload != strings.ToLower(payload) {
+	decoded, err := protocol.DecodeFixedHex("ed25519sig", value, ed25519.SignatureSize)
+	if err != nil {
 		return nil, fmt.Errorf("invalid signature")
 	}
 	return decoded, nil

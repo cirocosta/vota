@@ -4,7 +4,6 @@ package audit
 import (
 	"crypto/sha256"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"strings"
@@ -68,7 +67,7 @@ func Append(events []protocol.AuditEvent, pollID, eventType, objectHash string, 
 		}
 		sequence = last.Sequence + 1
 		previousHash = last.EventHash
-		lastTime, _ := time.Parse(time.RFC3339, last.AcceptedAt)
+		lastTime, _ := protocol.ParseCanonicalTime(last.AcceptedAt)
 		if acceptedAt.UTC().Before(lastTime) {
 			return protocol.AuditEvent{}, &Error{Code: "invalid_event_time"}
 		}
@@ -109,8 +108,8 @@ func Replay(events []protocol.AuditEvent) (string, error) {
 		if _, err := decodeHash(event.ObjectHash); err != nil {
 			return "", &Error{Code: "audit_chain_mismatch", Err: err}
 		}
-		parsedTime, err := time.Parse(time.RFC3339, event.AcceptedAt)
-		if err != nil || parsedTime.UTC().Format(time.RFC3339) != event.AcceptedAt || (!previousTime.IsZero() && parsedTime.Before(previousTime)) {
+		parsedTime, err := protocol.ParseCanonicalTime(event.AcceptedAt)
+		if err != nil || (!previousTime.IsZero() && parsedTime.Before(previousTime)) {
 			return "", &Error{Code: "audit_chain_mismatch", Err: fmt.Errorf("invalid time at sequence %d", event.Sequence)}
 		}
 		expected, err := eventHash(event)
@@ -143,12 +142,11 @@ func validEventType(value string) bool {
 }
 
 func decodeHash(value string) ([]byte, error) {
-	payload, ok := strings.CutPrefix(value, "sha256:")
-	if !ok {
+	if _, ok := strings.CutPrefix(value, "sha256:"); !ok {
 		return nil, fmt.Errorf("missing sha256 prefix")
 	}
-	decoded, err := hex.DecodeString(payload)
-	if err != nil || len(decoded) != sha256.Size || payload != strings.ToLower(payload) {
+	decoded, err := protocol.DecodeFixedHex("sha256", value, sha256.Size)
+	if err != nil {
 		return nil, fmt.Errorf("invalid sha256 value")
 	}
 	return decoded, nil

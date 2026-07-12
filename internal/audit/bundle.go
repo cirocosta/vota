@@ -5,7 +5,6 @@ import (
 	"crypto/ed25519"
 	"encoding/hex"
 	"fmt"
-	"strings"
 
 	"github.com/cirocosta/vota/internal/manifest"
 	"github.com/cirocosta/vota/internal/protocol"
@@ -158,9 +157,8 @@ func CompareBundles(first, second Bundle) error {
 }
 
 func bundleCheckpointKey(bundle Bundle) (ed25519.PublicKey, error) {
-	payload, ok := strings.CutPrefix(bundle.CheckpointKey, "ed25519:")
-	decoded, err := hex.DecodeString(payload)
-	if !ok || err != nil || len(decoded) != ed25519.PublicKeySize || payload != strings.ToLower(payload) {
+	decoded, err := protocol.DecodeFixedHex("ed25519", bundle.CheckpointKey, ed25519.PublicKeySize)
+	if err != nil {
 		return nil, &Error{Code: "invalid_checkpoint_key"}
 	}
 	return ed25519.PublicKey(decoded), nil
