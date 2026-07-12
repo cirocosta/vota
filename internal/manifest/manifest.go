@@ -419,7 +419,7 @@ func decodePrefixed(prefix, value string, length int) ([]byte, error) {
 		return nil, fmt.Errorf("expected %s prefix", prefix)
 	}
 	decoded, err := hex.DecodeString(payload)
-	if err != nil || len(decoded) != length {
+	if err != nil || len(decoded) != length || payload != strings.ToLower(payload) {
 		return nil, fmt.Errorf("expected %d-byte %s value", length, prefix)
 	}
 	return decoded, nil
